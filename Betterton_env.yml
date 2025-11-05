@@ -9,3 +9,4 @@ dependencies:
   - python=3.13
   - scikit-image
   - scipy
+  - pycodestyle
