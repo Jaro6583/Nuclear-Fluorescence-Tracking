@@ -11,3 +11,6 @@ This is my great description
 
 ## Flowchart
 I'll add my (approved) flowchart here.
+
+## How to use
+Provide step-by-step instructions on how to run the software (after it's done lol)
