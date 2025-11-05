@@ -1,23 +1,24 @@
-import skeleton_finder
+import sys
 from skimage.filters import gaussian
 from skimage.segmentation import active_contour
 import pandas as pd
 import numpy as np
 from scipy.spatial.distance import euclidean
 
+sys.path.append('src/')
 
-def skeleton_and_raw(skeleton_file="skeleton_coords.csv",
-                     raw_file="raw_data.mat",
+from SkeletonFinding import skeleton_finder
+
+
+def skeleton_and_raw(skeleton_file="src/data/skeleton_coords.csv",
+                     raw_file="src/data/raw_data.mat",
                      raw_name="movie_t_7z"):
-
     """
-    This function will return two coordinate sets:
-    the skeleton coordinates and the raw data.
-
-    The skeleton will be a Pandas DataFrame.
-
-    The raw data is a 3 dimensional NumPy array.
-    For most of these images, it is 150 pixels by 150 pixels by 7 z-slices
+    Returns:
+        skeleton_df (Pandas DataFrame): Contains all the skeleton coordinates
+        raw (3D numpy array): Contains the raw data for a single time point.
+            For most of these images, this will be 150 pixels by 150 pixels by
+                7 z-slices.
     """
     
     # Import raw data
@@ -131,6 +132,7 @@ def multi_fitter(skeletons, raw_data):
                 temp_df = pd.DataFrame(improved_fit, columns=["X", "Y"])
                 temp_df["Z"] = z
                 temp_df["Region_id"] = region_id
+                # FIXME: Figure out this warning
                 snakes = pd.concat([snakes, temp_df], ignore_index=True)
 
     return snakes
@@ -139,5 +141,5 @@ def multi_fitter(skeletons, raw_data):
 if __name__ == "__main__":
 
     # Import the skeleton data and the raw data
-    skeleton_coords, raw_data = skeleton_and_raw("skeleton_coords.csv", "raw_data.mat")
+    skeleton_coords, raw_data = skeleton_and_raw("src/data/skeleton_coords.csv", "src/data/raw_data.mat")
     snakes = multi_fitter(skeleton_coords, raw_data)

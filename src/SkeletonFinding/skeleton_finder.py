@@ -4,13 +4,14 @@ import matplotlib.pyplot as plt
 from skimage import measure
 from skimage.morphology import skeletonize
 import pandas as pd
+import sys
 
 
 def plot_skeleton_overlay(skeletons, save=False, legend=False):
     
     # Bring in raw data
     try:
-        raw = import_data(filename="raw_data.mat", name="movie_t_7z")
+        raw = import_data(filename="src/data/raw_data.mat", name="movie_t_7z")
     except Exception as e:
         print(f"Couldn't import raw data: {e}")
 
@@ -49,8 +50,6 @@ def plot_skeleton_overlay(skeletons, save=False, legend=False):
                 color_index = (region_id - 1) % num_colors
 
                 # Plot skeleton
-                # FIXME: The first two arguments are x and y coordinate values.
-                # I should consider swapping stuff so this is more readable
                 ax.scatter(coords[:, 0], coords[:, 1], s=1,
                            color=color_list[color_index],
                            label=f"Region {region_id}")
@@ -70,14 +69,14 @@ def plot_skeleton_overlay(skeletons, save=False, legend=False):
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
 
     if save:
-        plt.savefig("figures/skeleton_overlay_plot.png")
+        plt.savefig("src/figures/skeleton_overlay_plot.png")
     
     plt.show()
 
     return None
 
 
-def export_data(skeletons, output_filename="skeleton_coords.csv", save=True):
+def export_data(skeletons, output_filename="src/data/skeleton_coords.csv", save=True):
     """
     Converts a skeleton dictionary of coordinates into a pandas dataframe.
     Optionally export to a CSV.
@@ -127,7 +126,8 @@ def export_data(skeletons, output_filename="skeleton_coords.csv", save=True):
     return final_df
 
 
-def import_data(filename="post-threshold_data.mat", name="movie_filtered"):
+def import_data(filename="src/data/post-threshold_data.mat", name="movie_filtered"):
+
     # Default (in case it can't find the file)
     data = np.zeros((3,3,3))
 
@@ -138,11 +138,22 @@ def import_data(filename="post-threshold_data.mat", name="movie_filtered"):
     except FileNotFoundError:
         print(f"File {filename} not found.",
               "Make sure you're running in the correct directory.")
+    except Exception as e:
+        print(f"An error has occurred while trying to open {filename}: {e}")
 
     return data
 
 
-def skeleton_finder(datafile="post-threshold_data.mat"):
+def skeleton_finder(datafile="src/data/post-threshold_data.mat"):
+    """
+    returns:
+        all_skeletons (dict): A dictionary containing all the skeleton data.
+            Keys are tuples of (z-slice, Region_id).
+            Values are np arrays of size (N, 3) where N is the number of
+                points in that region.
+    """
+    
+    
     data = import_data(datafile)
 
     # Prepare dictionary
@@ -154,8 +165,6 @@ def skeleton_finder(datafile="post-threshold_data.mat"):
 
     for i in range(num_frames):
         z = i + 1
-        # Set the correct subplot
-        #ax = axes[i]
 
         # Grab image slice
         image_slice = data[:,:,i]
@@ -189,6 +198,7 @@ def skeleton_finder(datafile="post-threshold_data.mat"):
 
 
 if __name__ == "__main__":
-    skeleton_data = skeleton_finder("post-threshold_data.mat")
-    plot_skeleton_overlay(skeleton_data, save=True)
+    skeleton_data = skeleton_finder(datafile="src/data/post-threshold_data.mat")
+    #print(skeleton_data)
+    #plot_skeleton_overlay(skeleton_data, save=True)
     export_data(skeleton_data)
