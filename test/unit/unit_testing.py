@@ -8,7 +8,7 @@ from ActiveFitting import active_contours_from_skeleton
 
 
 # Import dummy files for testing
-#sys.path.append('test/unit/')  # noqa
+# sys.path.append('test/unit/')  # noqa
 
 
 class TestSkeletonFinder(unittest.TestCase):
@@ -31,11 +31,11 @@ class TestSkeletonFinder(unittest.TestCase):
 
         else:
             print(f"No skeleton found.")
-    
+
     def test_plot_skeleton_overlay(self):
 
         # Make sure the function works
-        #skeleton_finder.plot_skeleton_overlay(skeleton_data, save=True)
+        # skeleton_finder.plot_skeleton_overlay(skeleton_data, save=True)
         self.assertTrue(1 == 1)  # Dummy test
 
 
