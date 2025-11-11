@@ -83,7 +83,8 @@ class SegmentedCell:
     def run_thresholding(self, time_index=25, channel_index=1, smooth_sigma=1.0):
         """
         Takes the loaded 5D data, processes a single time point using
-        multi-Otsu thresholding (3 classes), and saves the result.
+        multi-Otsu thresholding (3 classes) on each individual z-slice,
+        then stacks them back together.
 
         Args:
             time_index (int): The 0-based time index to analyze
@@ -99,7 +100,7 @@ class SegmentedCell:
         print(f"Starting thresholding for time index {time_index}, channel {channel_index}...")
         self.processed_time_index = time_index
 
-        # Get data for one time point
+        # Get 3D data for one time point
         try:
             movie_t_7z = self.movie_ch2[:, :, :, time_index, channel_index]
             # Save the raw slice for later
@@ -107,32 +108,42 @@ class SegmentedCell:
         except IndexError:
             print(f"Error: Time index {time_index} or channel index {channel_index} is out of bounds for data with shape {self.movie_ch2.shape}")
             return
+        
+        # Loop through each Z-slice, apply 2D threshold, and collect results
+        all_slice_masks = []
+        num_z_slices = self.raw_data_t.shape[2]
 
-        # Smooth the raw 3D image to remove noise
-        if smooth_sigma > 0:
-            movie_smoothed = gaussian_filter(self.raw_data_t,
-                                             sigma=smooth_sigma,
-                                             mode='reflect')
-        else:
-            movie_smoothed = self.raw_data_t
+        for i in range(num_z_slices):
+            slice_data = self.raw_data_t[:, :, i]
 
-        # Calculate the best threshold using Otsu's method (ignoring pixels of zero)
-        try:
-            thresholds = threshold_multiotsu(movie_smoothed, classes=3)
-            nucleus_threshold = thresholds[1]
+            # Apply a 2D smooth
+            if smooth_sigma > 0:
+                slice_smoothed = gaussian_filter(slice_data,
+                                                sigma=smooth_sigma,
+                                                mode='reflect')
+            else:
+                slice_smoothed = slice_data
 
-        except ValueError:
-            print("Warning: Otsu thresholding failed. Image may be all-zero.")
-            self.post_threshold_data_t = np.zeros_like(self.raw_data_t, dtype=bool)
-            return
+            # Calculate the best threshold using Otsu's multi method
+            try:
+                thresholds = threshold_multiotsu(slice_smoothed, classes=3)
+                nucleus_threshold = thresholds[1]
 
-        # Apply the threshold to create a binary mask
-        binary_mask = movie_smoothed > nucleus_threshold
+                # Apply the upper threshold
+                slice_mask = slice_smoothed > nucleus_threshold
+                all_slice_masks.append(slice_mask)
 
-        # Save the final mask
-        self.post_threshold_data_t = binary_mask
+            except ValueError:
+                print("Warning: Otsu thresholding failed. Image may be all-zero.")
+                self.post_threshold_data_t = np.zeros_like(self.raw_data_t, dtype=bool)
+                return
+            except Exception as e:
+                print(f"Warning: Thresholding failed for z-slice {i+1}: {e}. Appending empty mask.")
+                all_slice_masks.append(np.zeros_like(slice_data, dtype=bool))
 
-        print(f"Thresholding complete. Otsu thresholds found at: BLANK FOR NOW")
+        # Stack the list of 2D masks back into a 3D (X, Y, Z) array
+        self.post_threshold_data_t = np.stack(all_slice_masks, axis=2)
+        print(f"Thresholding complete.")
 
 
     def print_info(self):
@@ -249,8 +260,8 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
     my_cell.print_info()
 
-    # Run thresholding for time index 25
-    my_cell.run_thresholding(time_index=25)
+    # Run thresholding for a single time index
+    my_cell.run_thresholding(time_index=2)
     my_cell.print_info()
 
     # Plot data
