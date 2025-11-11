@@ -22,7 +22,7 @@ class SegmentedCell:
 
         if not os.path.exists(mat_filepath):
             print(f"Warning: File not found at {mat_filepath}")
-        
+
         self.filepath = mat_filepath
         self.filename = os.path.basename(mat_filepath)
 
@@ -70,17 +70,17 @@ class SegmentedCell:
                         meta_data['sizeVoxelsY'],
                         meta_data['sizeVoxelsZ']
                     ]
-                
+
                 if 'time_step' in meta_data_fields:
                     self.time_step = meta_data['time_step']
-            
+
             print(f"Successfully loaded data for {self.filename}")
 
         except Exception as e:
             print(f"An error occurred while loading {self.filename}: {e}")
 
-    
-    def run_thresholding(self, time_index=25, channel_index=1, smooth_sigma=1.0):
+    def run_thresholding(self, time_index=25, channel_index=1,
+                         smooth_sigma=1.0):
         """
         Takes the loaded 5D data, processes a single time point using
         multi-Otsu thresholding (3 classes) on each individual z-slice,
@@ -96,8 +96,9 @@ class SegmentedCell:
         if self.movie_ch2 is None:
             print("Error: No data loaded. Call .load_mat_data() first.")
             return
-        
-        print(f"Starting thresholding for time index {time_index}, channel {channel_index}...")
+
+        print(f"Starting thresholding for time index {time_index},",
+              f"channel {channel_index}...")
         self.processed_time_index = time_index
 
         # Get 3D data for one time point
@@ -106,9 +107,11 @@ class SegmentedCell:
             # Save the raw slice for later
             self.raw_data_t = movie_t_7z
         except IndexError:
-            print(f"Error: Time index {time_index} or channel index {channel_index} is out of bounds for data with shape {self.movie_ch2.shape}")
+            print(f"Error: Time index {time_index} or channel index",
+                  f"{channel_index} is out of bounds for data with shape",
+                  f"{self.movie_ch2.shape}")
             return
-        
+
         # Loop through each Z-slice, apply 2D threshold, and collect results
         all_slice_masks = []
         num_z_slices = self.raw_data_t.shape[2]
@@ -119,8 +122,8 @@ class SegmentedCell:
             # Apply a 2D smooth
             if smooth_sigma > 0:
                 slice_smoothed = gaussian_filter(slice_data,
-                                                sigma=smooth_sigma,
-                                                mode='reflect')
+                                                 sigma=smooth_sigma,
+                                                 mode='reflect')
             else:
                 slice_smoothed = slice_data
 
@@ -134,17 +137,19 @@ class SegmentedCell:
                 all_slice_masks.append(slice_mask)
 
             except ValueError:
-                print("Warning: Otsu thresholding failed. Image may be all-zero.")
-                self.post_threshold_data_t = np.zeros_like(self.raw_data_t, dtype=bool)
+                print("Warning: Otsu thresholding failed."
+                      "Image may be all-zero.")
+                self.post_threshold_data_t = np.zeros_like(self.raw_data_t,
+                                                           dtype=bool)
                 return
             except Exception as e:
-                print(f"Warning: Thresholding failed for z-slice {i+1}: {e}. Appending empty mask.")
+                print(f"Warning: Thresholding failed for z-slice {i+1}:",
+                      f"{e}. Appending empty mask.")
                 all_slice_masks.append(np.zeros_like(slice_data, dtype=bool))
 
         # Stack the list of 2D masks back into a 3D (X, Y, Z) array
         self.post_threshold_data_t = np.stack(all_slice_masks, axis=2)
         print(f"Thresholding complete.")
-
 
     def print_info(self):
         """
@@ -158,19 +163,19 @@ class SegmentedCell:
             print(f"4D data shape ('cell3D'): {self.movie_ch2.shape}")
         else:
             print("4D Data: Not loaded. Call .load_mat_data() first.")
-        
+
         if self.raw_data_t is not None:
             print(f"3D Raw Slice Shape: {self.raw_data_t.shape}")
         else:
             print(f"3D Raw Slice: Not processed.")
-        
+
         if self.post_threshold_data_t is not None:
-            print(f"3D Thresholding Slice Shape: {self.post_threshold_data_t.shape}")
+            print(f"3D Thresholding Slice Shape:",
+                  f"{self.post_threshold_data_t.shape}")
         else:
             print(f"3D Thresholding Slice: Not processed.")
-        
-        print("-------------------------------------------\n")
 
+        print("-------------------------------------------\n")
 
     def _plot_3d_data(self, data_3d, title_prefix):
         """
@@ -180,13 +185,13 @@ class SegmentedCell:
         if data_3d is None:
             print(f"Error: No data available to plot for '{title_prefix}'")
             return
-        
+
         Z_INDEX = 2
         num_z_available = data_3d.shape[Z_INDEX]
         if num_z_available == 0:
             print(f"Error: Data has zero Z-slices.")
             return
-        
+
         # Plot the first 6 slices in a 2x3 grid
         num_z_to_plot = min(num_z_available, 6)
         nrows = 2
@@ -210,20 +215,20 @@ class SegmentedCell:
             ax.axis('off')
             if not is_binary:
                 fig.colorbar(im, ax=ax, shrink=0.8)
-        
+
         # Hide any unused subplots
         for j in range(num_z_to_plot, nrows * ncols):
             axes[j].axis['off']
-        
+
         # Get the time index that was used for this data
         time_info = ""
         if self.processed_time_index is not None:
             time_info = f"(t = {self.processed_time_index + 1})"
-        
-        fig.suptitle(f"{title_prefix} {time_info}\n(File: {self.filename})", fontsize=16)
+
+        fig.suptitle(f"{title_prefix} {time_info}\n(File: {self.filename})",
+                     fontsize=16)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95], h_pad=3.0)
         plt.show()
-
 
     def plot_raw_data(self):
         """
@@ -233,20 +238,21 @@ class SegmentedCell:
         print("Plotting raw data...")
         self._plot_3d_data(self.raw_data_t, "Raw Data (Pre-Thresholding)")
 
-
     def plot_thresholded_data(self):
         """
         Generates a plot of the final 3D thresholded mask for the selected
         time point (first 6 z-slices).
         """
         print("Plotting thresholded data...")
-        self._plot_3d_data(self.post_threshold_data_t, "Post-Thresholding Mask")
+        self._plot_3d_data(self.post_threshold_data_t,
+                           "Post-Thresholding Mask")
 
 
 if __name__ == "__main__":
 
     # Define cell path
-    CELL_PATH = r"C:\Users\jared\Desktop\Research\Nuclear-Fluorescence-Tracking\src\data\MB1411\Segmented Cells"
+    CELL_PATH = r"C:\Users\jared\Desktop\Research\Nuclear-Fluorescence-"
+    CELL_PATH += r"Tracking\src\data\MB1411\Segmented Cells"
     CELL_TYPE = "1411_200R_150G_q25s_25deg"
     CELL_NUMBER = "010_1"
 
@@ -261,7 +267,8 @@ if __name__ == "__main__":
     my_cell.print_info()
 
     # Run thresholding for a single time index
-    my_cell.run_thresholding(time_index=2)
+    time = 10
+    my_cell.run_thresholding(time_index=time)
     my_cell.print_info()
 
     # Plot data
@@ -271,6 +278,6 @@ if __name__ == "__main__":
     # Now access full 4D data
     if my_cell.post_threshold_data_t is not None:
         print("\n--- Accessing data ---")
-        print(f"Raw data shape (from t=25): {my_cell.raw_data_t.shape}")
-        print(f"Thresholded data shape (from t=25):",
+        print(f"Raw data shape (from t={time}): {my_cell.raw_data_t.shape}")
+        print(f"Thresholded data shape (from t={time}):",
               f"{my_cell.post_threshold_data_t.shape}")
