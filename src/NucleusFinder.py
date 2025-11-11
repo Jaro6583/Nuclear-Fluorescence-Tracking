@@ -1,8 +1,9 @@
 import scipy.io as sio
 import numpy as np
 import os
-from skimage.filters import gaussian
+from skimage.filters import threshold_multiotsu
 from scipy.ndimage import gaussian_filter
+import matplotlib.pyplot as plt
 
 
 class SegmentedCell:
@@ -34,6 +35,7 @@ class SegmentedCell:
         # 3D data for a single time point
         self.raw_data_t = None
         self.post_threshold_data_t = None
+        self.processed_time_index = None
 
         print(f"SegmentedCell object created for {self.filename}")
 
@@ -78,20 +80,24 @@ class SegmentedCell:
             print(f"An error occurred while loading {self.filename}: {e}")
 
     
-    def run_thresholding(self, time_index=25, channel_index=1):
+    def run_thresholding(self, time_index=25, channel_index=1, smooth_sigma=1.0):
         """
-        Takes the loaded 5D data, processes a single time point, and saves
-        the results into object attributes.
+        Takes the loaded 5D data, processes a single time point using
+        multi-Otsu thresholding (3 classes), and saves the result.
 
         Args:
-            time_index (int): The 0-based time index to analyze (ex: 25 for t=26)
+            time_index (int): The 0-based time index to analyze
+                (ex: 25 for t=26)
             channel_index (int): The 0-based chanel index to analyze
+            smooth_sigma (float): The sigma for the 3D Gaussian blur applied
+                before thresholding.
         """
         if self.movie_ch2 is None:
             print("Error: No data loaded. Call .load_mat_data() first.")
             return
         
         print(f"Starting thresholding for time index {time_index}, channel {channel_index}...")
+        self.processed_time_index = time_index
 
         # Get data for one time point
         try:
@@ -101,56 +107,38 @@ class SegmentedCell:
         except IndexError:
             print(f"Error: Time index {time_index} or channel index {channel_index} is out of bounds for data with shape {self.movie_ch2.shape}")
             return
-        
-        # Perform initial thresholding
-        non_zero_data = movie_t_7z[movie_t_7z != 0]
 
-        # Check if non_zero_data is empty after all
-        if non_zero_data.size == 0:
-            print(f"Warning: No non-zero data found at t={time_index}, channel={channel_index}.")
-            self.post_threshold_data_t = np.zeros_like(movie_t_7z)
+        # Smooth the raw 3D image to remove noise
+        if smooth_sigma > 0:
+            movie_smoothed = gaussian_filter(self.raw_data_t,
+                                             sigma=smooth_sigma,
+                                             mode='reflect')
+        else:
+            movie_smoothed = self.raw_data_t
+
+        # Calculate the best threshold using Otsu's method (ignoring pixels of zero)
+        try:
+            thresholds = threshold_multiotsu(movie_smoothed, classes=3)
+            nucleus_threshold = thresholds[1]
+
+        except ValueError:
+            print("Warning: Otsu thresholding failed. Image may be all-zero.")
+            self.post_threshold_data_t = np.zeros_like(self.raw_data_t, dtype=bool)
             return
 
-        c_min = np.nanmin(non_zero_data)
-        c_med = np.nanmedian(non_zero_data)
-        c_max = np.nanmax(non_zero_data)
+        # Apply the threshold to create a binary mask
+        binary_mask = movie_smoothed > nucleus_threshold
 
-        c_upp = c_med + 0.05 * (c_max - c_med)
+        # Save the final mask
+        self.post_threshold_data_t = binary_mask
 
-        movie_mod = np.zeros_like(movie_t_7z)
-        movie_mod[movie_mod > c_upp] = 1
+        print(f"Thresholding complete. Otsu thresholds found at: BLANK FOR NOW")
 
-        # Apply gaussian smooth
-        movie_smoothed = gaussian_filter(movie_mod, sigma=2, mode='reflect')
 
-        # Re-apply BW thresholding
-        non_zero_smoothed = movie_smoothed[movie_smoothed != 0]
-
-        if non_zero_smoothed.size == 0:
-            print(f"Warning: Thresholding (step 1) resulted in an all-zero image. Aborting.")
-            self.post_threshold_data_t = np.zeros_like(movie_smoothed)
-            return
-
-        fc_med = np.nanmedian(non_zero_smoothed)
-        fc_max = np.nanmax(non_zero_smoothed)
-
-        fc_upp = fc_med + 0.3 * (fc_max - fc_med)
-
-        movie_filtered = np.zeros_like(movie_smoothed)
-        movie_filtered[movie_smoothed < fc_med] = 0
-        movie_filtered[movie_smoothed > fc_upp] = 1  # Typo? Should be '> fc_med' ?
-
-        # Apply strict threshold
-        movie_filtered[movie_filtered < 1] = 0
-
-        # Save result
-        self.post_threshold_data_t = movie_filtered
-        print("Thresholding complete.")
-
-    
     def print_info(self):
         """
         A helper function to print the status of the loaded data.
+        FIXME: Decide what the useful things to print are.
         """
 
         print(f"\n--- Info for {self.filename} ---")
@@ -170,7 +158,78 @@ class SegmentedCell:
         else:
             print(f"3D Thresholding Slice: Not processed.")
         
-        print("-------------------------------------------")
+        print("-------------------------------------------\n")
+
+
+    def _plot_3d_data(self, data_3d, title_prefix):
+        """
+        Private helper method to plot the first 6 Z-slices of 3D data
+        (X, Y, Z) in a 2x3 grid.
+        """
+        if data_3d is None:
+            print(f"Error: No data available to plot for '{title_prefix}'")
+            return
+        
+        Z_INDEX = 2
+        num_z_available = data_3d.shape[Z_INDEX]
+        if num_z_available == 0:
+            print(f"Error: Data has zero Z-slices.")
+            return
+        
+        # Plot the first 6 slices in a 2x3 grid
+        num_z_to_plot = min(num_z_available, 6)
+        nrows = 2
+        ncols = 3
+
+        fig, axes = plt.subplots(nrows,
+                                 ncols,
+                                 figsize=(ncols * 4, nrows * 3.5),
+                                 squeeze=False)
+        axes = axes.flatten()
+
+        # Check if data is binary mask or grayscale
+        is_binary = data_3d.dtype == bool
+        cmap = 'gray' if not is_binary else 'viridis'
+
+        for i in range(num_z_to_plot):
+            ax = axes[i]
+            slice_data = data_3d[:, :, i]
+            im = ax.imshow(slice_data, cmap=cmap, interpolation='none')
+            ax.set_title(f"Z-Slice {i + 1}")
+            ax.axis('off')
+            if not is_binary:
+                fig.colorbar(im, ax=ax, shrink=0.8)
+        
+        # Hide any unused subplots
+        for j in range(num_z_to_plot, nrows * ncols):
+            axes[j].axis['off']
+        
+        # Get the time index that was used for this data
+        time_info = ""
+        if self.processed_time_index is not None:
+            time_info = f"(t = {self.processed_time_index + 1})"
+        
+        fig.suptitle(f"{title_prefix} {time_info}\n(File: {self.filename})", fontsize=16)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95], h_pad=3.0)
+        plt.show()
+
+
+    def plot_raw_data(self):
+        """
+        Generates a plot of the raw 3D data for the selected time point
+        (first 6 z-slices).
+        """
+        print("Plotting raw data...")
+        self._plot_3d_data(self.raw_data_t, "Raw Data (Pre-Thresholding)")
+
+
+    def plot_thresholded_data(self):
+        """
+        Generates a plot of the final 3D thresholded mask for the selected
+        time point (first 6 z-slices).
+        """
+        print("Plotting thresholded data...")
+        self._plot_3d_data(self.post_threshold_data_t, "Post-Thresholding Mask")
 
 
 if __name__ == "__main__":
@@ -178,7 +237,7 @@ if __name__ == "__main__":
     # Define cell path
     CELL_PATH = r"C:\Users\jared\Desktop\Research\Nuclear-Fluorescence-Tracking\src\data\MB1411\Segmented Cells"
     CELL_TYPE = "1411_200R_150G_q25s_25deg"
-    CELL_NUMBER = "010_2"
+    CELL_NUMBER = "010_1"
 
     # Build the full filepath
     full_path = os.path.join(CELL_PATH, f"{CELL_TYPE}_{CELL_NUMBER}.mat")
@@ -193,6 +252,10 @@ if __name__ == "__main__":
     # Run thresholding for time index 25
     my_cell.run_thresholding(time_index=25)
     my_cell.print_info()
+
+    # Plot data
+    my_cell.plot_raw_data()
+    my_cell.plot_thresholded_data()
 
     # Now access full 4D data
     if my_cell.post_threshold_data_t is not None:
