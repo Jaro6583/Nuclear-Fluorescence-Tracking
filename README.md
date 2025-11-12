@@ -1,13 +1,13 @@
 ## Overview
-This is my great description
+The purpose of this software is to take in a .nd2 data file that is 5 dimensional (X, Y, Z, t, channel). From the Betterton lab, channel 2 contains the fluorescence data for the nuclear envelope. These data are processed through the pipline seen below. The ideal result is a single data file that contains (X, Y, Z, t) and possibly Region_id.
 
 ## TODO
+- GET THE ACTIVE CONTOURS TO WORK!!!
 - Add versions to the dependencies list in the env.yml file
+- Build an ArgParser for the __main__ block (make this thing controllable from the command line)
 - Make thorough unit testing
 - Add functional testing
-- Organize the data file into the different data types
-- Create a clean flowchart for the data pipeline (confirm with Luke and Wil)
-- Enable visualization for the active contours file (enable saving)
+- Create a clean flowchart for the data pipeline
 
 ## Flowchart
 I'll add my (approved) flowchart here.
