@@ -4,6 +4,11 @@ import os
 from skimage.filters import threshold_multiotsu
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
+import pandas as pd
+from skimage import measure
+from skimage.morphology import skeletonize
+from skimage.segmentation import active_contour
+from scipy.spatial.distance import euclidean
 
 
 class SegmentedCell:
@@ -36,6 +41,13 @@ class SegmentedCell:
         self.raw_data_t = None
         self.post_threshold_data_t = None
         self.processed_time_index = None
+
+        # Skeleton attributes
+        self.skeletons = {}
+        self.skeletons_df = None
+
+        # Snake attribute
+        self.snakes_df = None
 
         print(f"SegmentedCell object created for {self.filename}")
 
@@ -94,18 +106,18 @@ class SegmentedCell:
                 before thresholding.
         """
         if self.movie_ch2 is None:
-            print("Error: No data loaded. Call .load_mat_data() first.")
+            print("\nError: No data loaded. Call .load_mat_data() first.")
             return
 
-        print(f"Starting thresholding for time index {time_index},",
+        print(f"\nStarting thresholding for time index {time_index},",
               f"channel {channel_index}...")
         self.processed_time_index = time_index
 
         # Get 3D data for one time point
         try:
-            movie_t_7z = self.movie_ch2[:, :, :, time_index, channel_index]
+            time_snip = self.movie_ch2[:, :, :, time_index, channel_index]
             # Save the raw slice for later
-            self.raw_data_t = movie_t_7z
+            self.raw_data_t = time_snip
         except IndexError:
             print(f"Error: Time index {time_index} or channel index",
                   f"{channel_index} is out of bounds for data with shape",
@@ -149,7 +161,74 @@ class SegmentedCell:
 
         # Stack the list of 2D masks back into a 3D (X, Y, Z) array
         self.post_threshold_data_t = np.stack(all_slice_masks, axis=2)
-        print(f"Thresholding complete.")
+        print(f"Thresholding complete.\n")
+
+    def find_skeletons(self):
+        """
+        Finds the skeletons from the 3D thresholded mask.
+
+        This method populates 'self.skeletons' with a dictionary:
+            Keys: (z_slice, region_id)
+            Values: (N, 3) numpy array of (X, Y, Z) coordinates
+        """
+        if self.post_threshold_data_t is None:
+            print("Error: No thresholded data found.")
+            print("Please run .run_thresholding() first")
+            return
+
+        print("\nFinding skeletons in thresholded data...")
+        data = self.post_threshold_data_t
+        self.skeletons = {}  # Clear any previous skeletons
+
+        # Initialize a list for the DataFrame
+        data_list = []
+
+        # Loop through each z-slice
+        Z_INDEX = 2
+        num_z_slices = data.shape[Z_INDEX]
+        for i in range(num_z_slices):
+            z = i + 1
+            image_slice = data[:, :, i]
+
+            # Label the data (find disconnected regions)
+            labeled_slice = measure.label(image_slice, connectivity=2)
+            num_objects = labeled_slice.max()
+
+            # Loop through each region in this slice
+            for region_label_ID in range(1, num_objects + 1):
+
+                # Isolate a single region
+                region = (labeled_slice == region_label_ID)
+
+                # Find skeleton
+                skeleton = skeletonize(region)
+
+                # Collect coordinates
+                rows, cols = np.nonzero(skeleton)
+
+                if rows.size > 0:
+                    # Create (X, Y, Z) coordinates
+                    z_coords = np.full(rows.shape, z)
+                    coords = np.column_stack((cols, rows, z_coords))
+                    self.skeletons[(z, region_label_ID)] = coords
+
+                    # Add to DataFrame list
+                    temp_df = pd.DataFrame(coords, columns=["X", "Y", "Z"])
+                    temp_df['Region_id'] = region_label_ID
+                    data_list.append(temp_df)
+                else:
+                    self.skeletons[(z, region_label_ID)] = np.array([])
+
+        # Create the final DataFrame
+        if data_list:
+            self.skeletons_df = pd.concat(data_list, ignore_index=True)
+        else:
+            self.skeletons_df = pd.DataFrame(
+                columns=["X", "Y", "Z", "Region_id"]
+            )
+
+        print(f"Skeleton finding complete.",
+              f"Found {len(self.skeletons)} regions.\n")
 
     def print_info(self):
         """
@@ -175,9 +254,20 @@ class SegmentedCell:
         else:
             print(f"3D Thresholding Slice: Not processed.")
 
-        print("-------------------------------------------\n")
+        if self.skeletons:
+            print(f"Skeletons found for {len(self.skeletons)} regions.")
+        else:
+            print(f"Skeletons: Not processed.")
 
-    def _plot_3d_data(self, data_3d, title_prefix):
+        if self.snakes_df is not None:
+            print(f"Active Contours fit for",
+                  f"{len(self.snakes_df["Region_id"].unique())} regions.")
+        else:
+            print(f'Active Contours: Not processed.')
+
+        print("-----------------------------------------------------\n")
+
+    def _plot_3d_data(self, data_3d, title_prefix, save_path=False):
         """
         Private helper method to plot the first 6 Z-slices of 3D data
         (X, Y, Z) in a 2x3 grid.
@@ -212,7 +302,7 @@ class SegmentedCell:
             slice_data = data_3d[:, :, i]
             im = ax.imshow(slice_data, cmap=cmap, interpolation='none')
             ax.set_title(f"Z-Slice {i + 1}")
-            ax.axis('off')
+            ax.invert_yaxis()
             if not is_binary:
                 fig.colorbar(im, ax=ax, shrink=0.8)
 
@@ -221,31 +311,300 @@ class SegmentedCell:
             axes[j].axis['off']
 
         # Get the time index that was used for this data
-        time_info = ""
+        time_info = "??"
         if self.processed_time_index is not None:
-            time_info = f"(t = {self.processed_time_index + 1})"
+            time_info = f"(time index = {self.processed_time_index})"
 
+        # Final formatting
         fig.suptitle(f"{title_prefix} {time_info}\n(File: {self.filename})",
                      fontsize=16)
         plt.tight_layout(rect=[0, 0.03, 1, 0.95], h_pad=3.0)
+
+        # Save figure (if requested)
+        if save_path:
+            try:
+                plt.savefig(save_path)
+                print(f"Saved plot to {save_path}\n")
+            except Exception as e:
+                print(f"Failed to save plot: {e}\n")
+
+        # Display plot
         plt.show()
 
-    def plot_raw_data(self):
+    def plot_raw_data(self, save_path=False):
         """
         Generates a plot of the raw 3D data for the selected time point
         (first 6 z-slices).
         """
-        print("Plotting raw data...")
-        self._plot_3d_data(self.raw_data_t, "Raw Data (Pre-Thresholding)")
+        print("Plotting raw data (see figure)")
+        self._plot_3d_data(self.raw_data_t,
+                           "Raw Data (Pre-Thresholding)",
+                           save_path=save_path)
 
-    def plot_thresholded_data(self):
+    def plot_thresholded_data(self, save_path=False):
         """
         Generates a plot of the final 3D thresholded mask for the selected
         time point (first 6 z-slices).
         """
-        print("Plotting thresholded data...")
+        print("Plotting thresholded data (see figure)")
         self._plot_3d_data(self.post_threshold_data_t,
-                           "Post-Thresholding Mask")
+                           "Post-Thresholding Mask",
+                           save_path=save_path)
+
+    def plot_skeleton_overlay(self, legend=False, save_path=None):
+        """
+        Plotting function that overlays the skeletons onto the raw data.
+        Saving is optional.
+        """
+
+        if self.raw_data_t is None:
+            print("Error: Missing raw data.",
+                  "Please run .run_thresholding() first.")
+            return
+        if not self.skeletons:
+            print("Error: Missing skeletons.",
+                  "Please run .find_skeletons() first.")
+            return
+
+        print("Plotting skeleton overlays (see figure)")
+
+        raw_data = self.raw_data_t
+        num_z_slices = min(raw_data.shape[2], 6)  # Plot 6 slices max
+        nrows = 2
+        ncols = 3
+
+        fig, axes = plt.subplots(nrows, ncols,
+                                 figsize=(ncols * 4, nrows * 3.5),
+                                 squeeze=False)
+        axes = axes.flatten()
+
+        # Set up colors
+        cmap = plt.get_cmap('tab10')
+        color_list = cmap.colors
+        num_colors = len(color_list)
+
+        # Loop through each z-slice
+        for i in range(num_z_slices):
+            ax = axes[i]
+            z = i + 1
+
+            # Plot raw data
+            ax.imshow(raw_data[:, :, i], cmap='gray', alpha=1)
+
+            # Find skeletons in this slice
+            for key, coords in self.skeletons.items():
+                slice_z, region_id = key
+
+                # Check if this skeleton belongs to this subplot
+                if slice_z == z and coords.size > 0:
+                    color_index = (region_id - 1) % num_colors
+
+                    # Plot X (coords[:, 0]) and Y (coords[:, 1])
+                    ax.scatter(coords[:, 0], coords[:, 1], s=1,
+                               color=color_list[color_index],
+                               label=f"Region {region_id}")
+
+            ax.set_title(f"Z-slice {z}")
+            ax.invert_yaxis()
+            if legend:
+                ax.legend(fontsize='small')
+
+        # Clean up extra axes
+        for j in range(num_z_slices, len(axes)):
+            axes[j].axis('off')
+
+        big_title = f"Skeleton Overlays "
+        big_title += f"(time index = {self.processed_time_index})\n"
+        big_title += f"(File: {self.filename})"
+        fig.suptitle(big_title, fontsize=16)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95], h_pad=3.0)
+
+        if save_path:
+            try:
+                plt.savefig(save_path)
+                print(f"Saved skeleton overlay plot to {save_path}")
+            except Exception as e:
+                print(f"Failed to save plot: {e}")
+
+        plt.show()
+
+    def _is_closed_loop(self, snake_coords, threshold=1.5):
+        """
+        Checks if a given snake (a numpy array of (N, 2) coordinates)
+        forms a closed loop using a distance huristic.
+        """
+        if snake_coords.shape[0] < 3:
+            return False  # Need at least 3 points
+
+        start_point = snake_coords[0]
+        end_point = snake_coords[-1]
+        distance = euclidean(start_point, end_point)
+
+        return distance < threshold
+
+    def _active_contour_fit(self, initial_fit, image, gamma=0.05):
+        """
+        Private wrapper for the skimage active_contour function.
+        """
+        snake = active_contour(image, initial_fit, gamma=gamma)
+        return snake
+
+    def fit_active_contours(self, gamma=0.05, closed_loop_threshold=1.5):
+        """
+        Fits active contours ('snakes') to the skeletons for the currently
+        processed time slice.
+
+        Reads from 'self.skeletons_df' and 'self.raw_data_t'.
+        Saves results to 'self.snakes_df'.
+
+        Args:
+            gamma (float): Active contour parameter. Higher values make the
+                contour more rigid.
+            closed_loop_threshold (float): The distance (in pixels) to use
+                for the closed-loop heuristic.
+        """
+        if self.raw_data_t is None:
+            print("Error: Missing raw data.",
+                  "Please run .run_thresholding() first.")
+            return
+
+        if self.skeletons_df is None:
+            print("Error: Missing skeleton data.",
+                  "Please run .find_skeletons() first.")
+            return
+
+        print(f"\nFitting active contours (gamma={gamma})...")
+
+        all_snakes_data = []
+        skeletons = self.skeletons_df
+
+        # Loop through each Z-slice in the skeleton data
+        for z_slice in skeletons["Z"].unique():
+
+            # Remember z is 1-based but index is 0-based
+            image_slice = self.raw_data_t[:, :, z_slice - 1]
+
+            # Get all skeletons for this slice
+            slice_skeletons = skeletons[skeletons["Z"] == z_slice]
+
+            # Loop through each unique region in this slice
+            for region_id in slice_skeletons["Region_id"].unique():
+
+                # Isolate region coordinates
+                region_coords = slice_skeletons[
+                    slice_skeletons["Region_id"] == region_id
+                ][["X", "Y"]].values
+
+                if region_coords.shape[0] < 3:
+                    continue  # Not enough points to fit
+
+                # Check if this region is circular or not
+                circular = self._is_closed_loop(region_coords,
+                                                closed_loop_threshold)
+
+                if circular:
+                    # Close the loop by adding the first point to the end
+                    start_point = region_coords[0, :].reshape(1, -1)
+                    initial_snake = np.vstack([region_coords, start_point])
+                else:
+                    initial_snake = region_coords
+
+                # Perform the fit
+                improved_fit = self._active_contour_fit(initial_snake,
+                                                        image_slice,
+                                                        gamma=gamma)
+
+                # Make a temporary DataFrame and add it to our list
+                temp_df = pd.DataFrame(improved_fit, columns=["X", "Y"])
+                temp_df["Z"] = z_slice
+                temp_df["Region_id"] = region_id
+                all_snakes_data.append(temp_df)
+
+        if not all_snakes_data:
+            print("Warning: No snakes were fit.")
+            self.snakes_df = pd.DataFrame(columns=["X", "Y", "Z", "Region_id"])
+            return
+
+        self.snakes_df = pd.concat(all_snakes_data, ignore_index=True)
+        print("Active contour fitting complete.\n")
+
+    def plot_snake_overlay(self, legend=False, save_path=None):
+        """
+        Plotting function that overlays the fitted snakes onto the raw data.
+        Saving is optional.
+        """
+        if self.raw_data_t is None:
+            print("Error: Missing raw data.",
+                  "Please run .run_thresholding() first.")
+            return
+
+        if self.snakes_df is None:
+            print("Error: Missing snake fits.",
+                  "Please run .fit_active_contours() first.")
+            return
+
+        print("Plotting snake overlays (see figure).")
+
+        # Initialize sub-plots
+        raw_data = self.raw_data_t
+        num_z_slices = min(raw_data.shape[2], 6)
+        nrows = 2
+        ncols = 3
+
+        fig, axes = plt.subplots(nrows, ncols,
+                                 figsize=(ncols * 4, nrows * 3.5),
+                                 squeeze=False)
+        axes = axes.flatten()
+
+        # Set up color options
+        cmap = plt.get_cmap('tab10')
+        color_list = cmap.colors
+        num_colors = len(color_list)
+
+        # Loop through each Z-slice
+        for i in range(num_z_slices):
+            ax = axes[i]
+            z = i + 1
+            ax.imshow(raw_data[:, :, i], cmap='gray', alpha=1)
+
+            # Find the snakes within this slice and loop through them
+            slice_snakes = self.snakes_df[self.snakes_df["Z"] == z]
+            for region_id in slice_snakes["Region_id"].unique():
+                snake_coords = slice_snakes[
+                    slice_snakes["Region_id"] == region_id
+                ][["X", "Y"]].values
+
+                color_index = (region_id - 1) % num_colors
+
+                # Plot lines for snakes
+                ax.plot(snake_coords[:, 0], snake_coords[:, 1],
+                        color=color_list[color_index],
+                        linewidth=1.5,
+                        label=f"Region {region_id}")
+
+            ax.set_title(f"Z-slice {z}")
+            ax.invert_yaxis()
+            if legend:
+                ax.legend(fontsize='small')
+
+        # Clean up unused plots
+        for j in range(num_z_slices, len(axes)):
+            axes[j].axis('off')
+
+        big_title = f"Active Contour (Snake) Overlays "
+        big_title += f"(time_index = {self.processed_time_index})\n"
+        big_title += f"(File: {self.filename})"
+        fig.suptitle(big_title, fontsize=16)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95], h_pad=3.0)
+
+        if save_path:
+            try:
+                plt.savefig(save_path)
+                print(f"Saved snake overlay plot to {save_path}")
+            except Exception as e:
+                print(f'Failed to save plot: {e}')
+
+        plt.show()
 
 
 if __name__ == "__main__":
@@ -259,25 +618,29 @@ if __name__ == "__main__":
     # Build the full filepath
     full_path = os.path.join(CELL_PATH, f"{CELL_TYPE}_{CELL_NUMBER}.mat")
 
-    # Create an instance of the class
+    # Create an instance of the class and load data
     my_cell = SegmentedCell(full_path)
-
-    # Load data and print
     my_cell.load_mat_data()
-    my_cell.print_info()
 
     # Run thresholding for a single time index
     time = 10
     my_cell.run_thresholding(time_index=time)
+
+    # Plot raw and thresholded data (save)
+    my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
+    my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
+
+    # Find skeletons from the threshold mask
+    my_cell.find_skeletons()
+
+    # Plot skeleton overlays
+    my_cell.plot_skeleton_overlay(save_path="src/figures/skeleton_overlay.png")
+
+    # Fit active contours (Snakes)
+    my_cell.fit_active_contours()
+
+    # Plot snakes
+    my_cell.plot_snake_overlay(save_path="src/figures/snake_overlay.png")
+
+    # Print final info
     my_cell.print_info()
-
-    # Plot data
-    my_cell.plot_raw_data()
-    my_cell.plot_thresholded_data()
-
-    # Now access full 4D data
-    if my_cell.post_threshold_data_t is not None:
-        print("\n--- Accessing data ---")
-        print(f"Raw data shape (from t={time}): {my_cell.raw_data_t.shape}")
-        print(f"Thresholded data shape (from t={time}):",
-              f"{my_cell.post_threshold_data_t.shape}")
