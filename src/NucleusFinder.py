@@ -175,7 +175,7 @@ class SegmentedCell:
             print("Error: No thresholded data found.")
             print("Please run .run_thresholding() first")
             return
-        
+
         print("\nFinding skeletons in thresholded data...")
         data = self.post_threshold_data_t
         self.skeletons = {}  # Clear any previous skeletons
@@ -218,14 +218,17 @@ class SegmentedCell:
                     data_list.append(temp_df)
                 else:
                     self.skeletons[(z, region_label_ID)] = np.array([])
-        
+
         # Create the final DataFrame
         if data_list:
             self.skeletons_df = pd.concat(data_list, ignore_index=True)
         else:
-            self.skeletons_df = pd.DataFrame(columns=["X", "Y", "Z", "Region_id"])
-        
-        print(f"Skeleton finding complete. Found {len(self.skeletons)} regions.\n")
+            self.skeletons_df = pd.DataFrame(
+                columns=["X", "Y", "Z", "Region_id"]
+            )
+
+        print(f"Skeleton finding complete.",
+              f"Found {len(self.skeletons)} regions.\n")
 
     def print_info(self):
         """
@@ -250,14 +253,15 @@ class SegmentedCell:
                   f"{self.post_threshold_data_t.shape}")
         else:
             print(f"3D Thresholding Slice: Not processed.")
-        
+
         if self.skeletons:
             print(f"Skeletons found for {len(self.skeletons)} regions.")
         else:
             print(f"Skeletons: Not processed.")
-        
+
         if self.snakes_df is not None:
-            print(f"Active Contours fit for {len(self.snakes_df["Region_id"].unique())} regions.")
+            print(f"Active Contours fit for",
+                  f"{len(self.snakes_df["Region_id"].unique())} regions.")
         else:
             print(f'Active Contours: Not processed.')
 
@@ -323,7 +327,7 @@ class SegmentedCell:
                 print(f"Saved plot to {save_path}\n")
             except Exception as e:
                 print(f"Failed to save plot: {e}\n")
-        
+
         # Display plot
         plt.show()
 
@@ -346,7 +350,7 @@ class SegmentedCell:
         self._plot_3d_data(self.post_threshold_data_t,
                            "Post-Thresholding Mask",
                            save_path=save_path)
-    
+
     def plot_skeleton_overlay(self, legend=False, save_path=None):
         """
         Plotting function that overlays the skeletons onto the raw data.
@@ -354,12 +358,14 @@ class SegmentedCell:
         """
 
         if self.raw_data_t is None:
-            print("Error: Missing raw data. Please run .run_thresholding() first.")
+            print("Error: Missing raw data.",
+                  "Please run .run_thresholding() first.")
             return
         if not self.skeletons:
-            print("Error: Missing skeletons. Please run .find_skeletons() first.")
+            print("Error: Missing skeletons.",
+                  "Please run .find_skeletons() first.")
             return
-        
+
         print("Plotting skeleton overlays (see figure)")
 
         raw_data = self.raw_data_t
@@ -376,7 +382,7 @@ class SegmentedCell:
         cmap = plt.get_cmap('tab10')
         color_list = cmap.colors
         num_colors = len(color_list)
-        
+
         # Loop through each z-slice
         for i in range(num_z_slices):
             ax = axes[i]
@@ -397,16 +403,16 @@ class SegmentedCell:
                     ax.scatter(coords[:, 0], coords[:, 1], s=1,
                                color=color_list[color_index],
                                label=f"Region {region_id}")
-            
+
             ax.set_title(f"Z-slice {z}")
             ax.invert_yaxis()
             if legend:
                 ax.legend(fontsize='small')
-        
+
         # Clean up extra axes
         for j in range(num_z_slices, len(axes)):
             axes[j].axis('off')
-        
+
         big_title = f"Skeleton Overlays "
         big_title += f"(time index = {self.processed_time_index})\n"
         big_title += f"(File: {self.filename})"
@@ -419,7 +425,7 @@ class SegmentedCell:
                 print(f"Saved skeleton overlay plot to {save_path}")
             except Exception as e:
                 print(f"Failed to save plot: {e}")
-        
+
         plt.show()
 
     def _is_closed_loop(self, snake_coords, threshold=1.5):
@@ -429,20 +435,20 @@ class SegmentedCell:
         """
         if snake_coords.shape[0] < 3:
             return False  # Need at least 3 points
-        
+
         start_point = snake_coords[0]
         end_point = snake_coords[-1]
         distance = euclidean(start_point, end_point)
 
         return distance < threshold
-    
+
     def _active_contour_fit(self, initial_fit, image, gamma=0.05):
         """
         Private wrapper for the skimage active_contour function.
         """
         snake = active_contour(image, initial_fit, gamma=gamma)
         return snake
-    
+
     def fit_active_contours(self, gamma=0.05, closed_loop_threshold=1.5):
         """
         Fits active contours ('snakes') to the skeletons for the currently
@@ -461,12 +467,12 @@ class SegmentedCell:
             print("Error: Missing raw data.",
                   "Please run .run_thresholding() first.")
             return
-        
+
         if self.skeletons_df is None:
             print("Error: Missing skeleton data.",
                   "Please run .find_skeletons() first.")
             return
-        
+
         print(f"\nFitting active contours (gamma={gamma})...")
 
         all_snakes_data = []
@@ -491,37 +497,37 @@ class SegmentedCell:
 
                 if region_coords.shape[0] < 3:
                     continue  # Not enough points to fit
-                
+
                 # Check if this region is circular or not
                 circular = self._is_closed_loop(region_coords,
-                                                threshold=closed_loop_threshold)
-                
+                                                closed_loop_threshold)
+
                 if circular:
                     # Close the loop by adding the first point to the end
                     start_point = region_coords[0, :].reshape(1, -1)
                     initial_snake = np.vstack([region_coords, start_point])
                 else:
                     initial_snake = region_coords
-                
+
                 # Perform the fit
                 improved_fit = self._active_contour_fit(initial_snake,
                                                         image_slice,
                                                         gamma=gamma)
-                
+
                 # Make a temporary DataFrame and add it to our list
                 temp_df = pd.DataFrame(improved_fit, columns=["X", "Y"])
                 temp_df["Z"] = z_slice
                 temp_df["Region_id"] = region_id
                 all_snakes_data.append(temp_df)
-        
+
         if not all_snakes_data:
             print("Warning: No snakes were fit.")
             self.snakes_df = pd.DataFrame(columns=["X", "Y", "Z", "Region_id"])
             return
-        
+
         self.snakes_df = pd.concat(all_snakes_data, ignore_index=True)
         print("Active contour fitting complete.\n")
-    
+
     def plot_snake_overlay(self, legend=False, save_path=None):
         """
         Plotting function that overlays the fitted snakes onto the raw data.
@@ -531,12 +537,12 @@ class SegmentedCell:
             print("Error: Missing raw data.",
                   "Please run .run_thresholding() first.")
             return
-        
+
         if self.snakes_df is None:
             print("Error: Missing snake fits.",
                   "Please run .fit_active_contours() first.")
             return
-        
+
         print("Plotting snake overlays (see figure).")
 
         # Initialize sub-plots
@@ -575,16 +581,16 @@ class SegmentedCell:
                         color=color_list[color_index],
                         linewidth=1.5,
                         label=f"Region {region_id}")
-            
+
             ax.set_title(f"Z-slice {z}")
             ax.invert_yaxis()
             if legend:
                 ax.legend(fontsize='small')
-        
+
         # Clean up unused plots
         for j in range(num_z_slices, len(axes)):
             axes[j].axis('off')
-        
+
         big_title = f"Active Contour (Snake) Overlays "
         big_title += f"(time_index = {self.processed_time_index})\n"
         big_title += f"(File: {self.filename})"
@@ -597,7 +603,7 @@ class SegmentedCell:
                 print(f"Saved snake overlay plot to {save_path}")
             except Exception as e:
                 print(f'Failed to save plot: {e}')
-        
+
         plt.show()
 
 
