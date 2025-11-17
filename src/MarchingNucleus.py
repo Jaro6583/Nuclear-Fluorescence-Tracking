@@ -179,13 +179,15 @@ class SegmentedCell:
         self.post_threshold_data_t = np.stack(all_slice_masks, axis=2)
         print(f"Thresholding complete.\n")
 
-    def generate_3d_surface(self, step_size=1):
+    def generate_3d_surface(self, step_size=1, mesh_smooth_sigma=1.0):
         """
         Generates a 3D surface mesh from the binary mask using Marching Cubes.
 
         Args:
             step_size (int): Step size in voxels. Larger values (e.g. 2)
                 generate coarser meshes but run faster.
+            mesh_smooth_sigma (float): Amount of smoothing to apply to the
+                mask before generating the mesh.
         """
         if self.post_threshold_data_t is None:
             print("Error: Missing thresholded data.",
@@ -202,10 +204,19 @@ class SegmentedCell:
             spacing = (1.0, 1.0, 1.0)
             print("Warning: No voxel size found. Assuming isotropic (1.0, 1.0, 1.0)")
         
+        # Smooth the binary mask before we mesh it
+        # Note that this is a 3D-smoothing. It accounts for the z-slice data
+        # above and below each region.
+        if mesh_smooth_sigma > 0:
+            mask_float = self.post_threshold_data_t.astype(float)
+            volume_to_mesh = gaussian_filter(mask_float, sigma=mesh_smooth_sigma)
+        else:
+            volume_to_mesh = self.post_threshold_data_t
+        
         try:
             # Run marching cubes
             verts, faces, normals, values = marching_cubes(
-                self.post_threshold_data_t,
+                volume_to_mesh,
                 level=0.5,
                 spacing=spacing,
                 step_size=step_size,
@@ -240,6 +251,8 @@ class SegmentedCell:
         mask_bool = self.post_threshold_data_t.astype(bool)
 
         # Clean
+        # Note that this is a 3D cleaning. It accounts for the z-slice above
+        # and below the region of interest.
         cleaned_mask = remove_small_objects(mask_bool, min_size=min_size)
 
         self.post_threshold_data_t = cleaned_mask
@@ -337,7 +350,7 @@ class SegmentedCell:
             print("Error: No mesh found. Run .generate_3d_surface() first.")
             return
         
-        print("Plotting 3D surface (this may take a moment)...")
+        print("Plotting 3D surface...")
 
         fig = plt.figure(figsize=(10, 10))
         ax = fig.add_subplot(111, projection='3d')
