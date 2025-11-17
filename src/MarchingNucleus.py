@@ -12,6 +12,7 @@ from scipy.spatial.distance import euclidean
 from skimage.morphology import binary_opening, disk
 from skimage.measure import marching_cubes
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+from skimage.morphology import remove_small_objects
 
 
 class SegmentedCell:
@@ -221,6 +222,29 @@ class SegmentedCell:
         except Exception as e:
             print(f"An error has occurred during Marching Cubes: {e}")
     
+    def clean_mask(self, min_size=50):
+        """
+        Sweeps through the binary mask to remove small, disconnected floating blobs.
+
+        Args:
+            min_size (int): The smallest allowable object size (in voxels).
+                Any blob smaller than this is deleted.
+        """
+        if self.post_threshold_data_t is None:
+            print("Error: Missing thresholded data. Run .run_thresholding() first.")
+            return
+        
+        print(f"Cleaning mask (removing blobs < {min_size} voxels)...")
+
+        # Convert to a boolean array
+        mask_bool = self.post_threshold_data_t.astype(bool)
+
+        # Clean
+        cleaned_mask = remove_small_objects(mask_bool, min_size=min_size)
+
+        self.post_threshold_data_t = cleaned_mask
+        print("Mask cleaned.")
+    
     def _plot_slices(self, data_3d, title_prefix, save_path=False):
         """
         Private helper method to plot the first 6 Z-slices of 3D data
@@ -352,7 +376,7 @@ class SegmentedCell:
         ax.set_ylabel("Y (microns)")
         ax.set_zlabel("Z (microns)")
 
-        title = f"3D Reconstruction (t={self.processed_time_index}\n(File: {self.filename}))"
+        title = f"3D Reconstruction (t={self.processed_time_index})\n(File: {self.filename})"
         plt.title(title)
 
         if save_path:
@@ -380,6 +404,9 @@ if __name__ == "__main__":
     # Run thresholding for a single time index
     time = 10
     my_cell.run_thresholding(time_index=time)
+
+    # Clean mask
+    my_cell.clean_mask()
 
     # Plot raw and thresholded data (save)
     my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
