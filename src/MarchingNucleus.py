@@ -327,15 +327,32 @@ class SegmentedCell:
 
         # Auto-scale the axes to fit the mesh
         verts = self.mesh_verts
-        ax.set_xlim(verts[:, 0].min(), verts[:, 0].max())
-        ax.set_ylim(verts[:, 1].min(), verts[:, 1].max())
-        ax.set_zlim(verts[:, 2].min(), verts[:, 2].max())
+        xlim = (verts[:, 0].min(), verts[:, 0].max())
+        ylim = (verts[:, 1].min(), verts[:, 1].max())
+        zlim = (verts[:, 2].min(), verts[:, 2].max())
 
+        # Calculate the range (span) of each axis
+        x_span = xlim[1] - xlim[0]
+        y_span = ylim[1] - ylim[0]
+        z_span = zlim[1] - zlim[0]
+
+        # Find max span and the midpoints of the data
+        max_span = max(x_span, y_span, z_span)
+        x_mid = np.mean(xlim)
+        y_mid = np.mean(ylim)
+        z_mid = np.mean(zlim)
+
+        # Set axis limits
+        ax.set_xlim(x_mid - max_span / 2, x_mid + max_span / 2)
+        ax.set_ylim(y_mid - max_span / 2, y_mid + max_span / 2)
+        ax.set_zlim(z_mid - max_span / 2, z_mid + max_span / 2)
+
+        # Label axes
         ax.set_xlabel("X (microns)")
         ax.set_ylabel("Y (microns)")
         ax.set_zlabel("Z (microns)")
 
-        title = f"3D Reconstruction (t={self.processed_time_index})"
+        title = f"3D Reconstruction (t={self.processed_time_index}\n(File: {self.filename}))"
         plt.title(title)
 
         if save_path:
