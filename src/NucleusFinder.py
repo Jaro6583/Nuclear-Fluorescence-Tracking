@@ -9,6 +9,7 @@ from skimage import measure
 from skimage.morphology import skeletonize
 from skimage.segmentation import active_contour
 from scipy.spatial.distance import euclidean
+from skimage.morphology import binary_opening, disk
 
 
 class SegmentedCell:
@@ -92,7 +93,7 @@ class SegmentedCell:
             print(f"An error occurred while loading {self.filename}: {e}")
 
     def run_thresholding(self, time_index=25, channel_index=1,
-                         smooth_sigma=1.0):
+                         smooth_sigma=1.0, binary_smoth_size=2):
         """
         Takes the loaded 5D data, processes a single time point using
         multi-Otsu thresholding (3 classes) on each individual z-slice,
@@ -104,6 +105,8 @@ class SegmentedCell:
             channel_index (int): The 0-based chanel index to analyze
             smooth_sigma (float): The sigma for the 3D Gaussian blur applied
                 before thresholding.
+            binary_smooth_size (int): Radius of the disk used for binary
+                opening. Higher values smooth the edge more.
         """
         if self.movie_ch2 is None:
             print("\nError: No data loaded. Call .load_mat_data() first.")
@@ -146,6 +149,12 @@ class SegmentedCell:
 
                 # Apply the upper threshold
                 slice_mask = slice_smoothed > nucleus_threshold
+
+                # Smooth the mask
+                if binary_smoth_size > 0:
+                    footprint = disk(binary_smoth_size)
+                    slice_mask = binary_opening(slice_mask, footprint)
+
                 all_slice_masks.append(slice_mask)
 
             except ValueError:
@@ -265,7 +274,7 @@ class SegmentedCell:
         else:
             print(f'Active Contours: Not processed.')
 
-        print("-----------------------------------------------------\n")
+        print("----------------------------------------------------\n")
 
     def _plot_3d_data(self, data_3d, title_prefix, save_path=False):
         """
@@ -442,14 +451,15 @@ class SegmentedCell:
 
         return distance < threshold
 
-    def _active_contour_fit(self, initial_fit, image, gamma=0.05):
-        """
-        Private wrapper for the skimage active_contour function.
-        """
-        snake = active_contour(image, initial_fit, gamma=gamma)
-        return snake
-
-    def fit_active_contours(self, gamma=0.05, closed_loop_threshold=1.5):
+    def fit_active_contours(self,
+                            alpha=0.01,
+                            beta=10.0,
+                            gamma=0.05,
+                            w_line=1.0,
+                            w_edge=0.0,
+                            max_num_iter=500,
+                            closed_loop_threshold=1.5,
+                            snake_blur_sigma=2.0):
         """
         Fits active contours ('snakes') to the skeletons for the currently
         processed time slice.
@@ -462,6 +472,10 @@ class SegmentedCell:
                 contour more rigid.
             closed_loop_threshold (float): The distance (in pixels) to use
                 for the closed-loop heuristic.
+            snake_blur_sigma (float): Sigma for Gaussian blur applied to the
+                raw image before active fitting.
+            beta (float): Rigidity parameter. Higher values make the snake
+                less flexible and more rigid.
         """
         if self.raw_data_t is None:
             print("Error: Missing raw data.",
@@ -476,14 +490,34 @@ class SegmentedCell:
         print(f"\nFitting active contours (gamma={gamma})...")
 
         all_snakes_data = []
+        all_processed_slices = []
         skeletons = self.skeletons_df
 
         # Loop through each Z-slice in the skeleton data
         for z_slice in skeletons["Z"].unique():
 
             # Remember z is 1-based but index is 0-based
-            image_slice = self.raw_data_t[:, :, z_slice - 1]
+            image_slice_raw = self.raw_data_t[:, :, z_slice - 1]
 
+            # Blur the raw image to create a smooth "force field"
+            if snake_blur_sigma > 0:
+                image_slice_blurred = gaussian_filter(image_slice_raw,
+                                                          sigma=snake_blur_sigma,
+                                                          mode="reflect")
+            else:
+                image_slice_blurred = image_slice_raw
+
+            # Normalize the image
+            img_min = image_slice_blurred.min()
+            img_max = image_slice_blurred.max()
+            if img_max > img_min:
+                image_slice_norm = (image_slice_blurred - img_min) / (img_max - img_min)
+            else:
+                image_slice_norm = image_slice_blurred  # Handle blank images
+            
+            # Add this normalized slice to the processed list
+            all_processed_slices.append(image_slice_norm)
+            
             # Get all skeletons for this slice
             slice_skeletons = skeletons[skeletons["Z"] == z_slice]
 
@@ -510,9 +544,17 @@ class SegmentedCell:
                     initial_snake = region_coords
 
                 # Perform the fit
-                improved_fit = self._active_contour_fit(initial_snake,
-                                                        image_slice,
-                                                        gamma=gamma)
+                improved_fit = active_contour(
+                    image_slice_norm,
+                    initial_snake,
+                    alpha=alpha,
+                    beta=beta,
+                    gamma=gamma,
+                    w_line=w_line,
+                    w_edge=w_edge,
+                    boundary_condition="periodic",
+                    max_num_iter=max_num_iter
+                )
 
                 # Make a temporary DataFrame and add it to our list
                 temp_df = pd.DataFrame(improved_fit, columns=["X", "Y"])
@@ -523,31 +565,53 @@ class SegmentedCell:
         if not all_snakes_data:
             print("Warning: No snakes were fit.")
             self.snakes_df = pd.DataFrame(columns=["X", "Y", "Z", "Region_id"])
-            return
+        else:
+            self.snakes_df = pd.concat(all_snakes_data, ignore_index=True)
 
-        self.snakes_df = pd.concat(all_snakes_data, ignore_index=True)
+        # Save the processed background
+        self.processed_image_t = np.stack(all_processed_slices, axis=2)
+
         print("Active contour fitting complete.\n")
+        print(f"No snakes were harmed in the fitting of these data.")
 
-    def plot_snake_overlay(self, legend=False, save_path=None):
+    def plot_snake_overlay(self, background='raw', legend=False, save_path=None):
         """
         Plotting function that overlays the fitted snakes onto the raw data.
         Saving is optional.
-        """
-        if self.raw_data_t is None:
-            print("Error: Missing raw data.",
-                  "Please run .run_thresholding() first.")
-            return
 
+        Args:
+            background (str): 'raw' (default) or 'processed'.
+                Determines the background image.
+            legend (bool): Add legend to the plots or not. 
+            save_path (str): A provided path will save the image at the
+                specified path. Leaving this blank will not save the image.
+        """
         if self.snakes_df is None:
             print("Error: Missing snake fits.",
                   "Please run .fit_active_contours() first.")
             return
 
+        # Select background data
+        if background == 'raw':
+            bg_data = self.raw_data_t
+            bg_cmap = 'gray'
+            title_bg = "Raw Data"
+        elif background == 'processed':
+            bg_data = self.processed_image_t
+            bg_cmap = 'gray'
+            title_bg = "Processed (Blurred/Normalized) Data"
+        else:
+            print(f"Error: background must be 'raw' or 'processed', not {background}.")
+            return
+        
+        if bg_data is None:
+            print(f"Error: Background data for '{background}' is not available.")
+            return
+        
         print("Plotting snake overlays (see figure).")
 
         # Initialize sub-plots
-        raw_data = self.raw_data_t
-        num_z_slices = min(raw_data.shape[2], 6)
+        num_z_slices = min(bg_data.shape[2], 6)
         nrows = 2
         ncols = 3
 
@@ -565,7 +629,7 @@ class SegmentedCell:
         for i in range(num_z_slices):
             ax = axes[i]
             z = i + 1
-            ax.imshow(raw_data[:, :, i], cmap='gray', alpha=1)
+            ax.imshow(bg_data[:, :, i], cmap=bg_cmap, alpha=1)
 
             # Find the snakes within this slice and loop through them
             slice_snakes = self.snakes_df[self.snakes_df["Z"] == z]
@@ -576,11 +640,8 @@ class SegmentedCell:
 
                 color_index = (region_id - 1) % num_colors
 
-                # Plot lines for snakes
-                ax.plot(snake_coords[:, 0], snake_coords[:, 1],
-                        color=color_list[color_index],
-                        linewidth=1.5,
-                        label=f"Region {region_id}")
+                # Plot snakes
+                ax.scatter(snake_coords[:, 0], snake_coords[:, 1], color=color_list[color_index], s=1.0, label=f"Region {region_id}")
 
             ax.set_title(f"Z-slice {z}")
             ax.invert_yaxis()
@@ -627,7 +688,7 @@ if __name__ == "__main__":
     my_cell.run_thresholding(time_index=time)
 
     # Plot raw and thresholded data (save)
-    my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
+    #my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
     my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
 
     # Find skeletons from the threshold mask
@@ -637,10 +698,17 @@ if __name__ == "__main__":
     my_cell.plot_skeleton_overlay(save_path="src/figures/skeleton_overlay.png")
 
     # Fit active contours (Snakes)
-    my_cell.fit_active_contours()
+    my_cell.fit_active_contours(
+        alpha=0.0001,
+        beta=1000.0,
+        w_line=100.0,
+        w_edge=-1.0,
+        snake_blur_sigma=2.0,
+        max_num_iter=5
+    )
 
     # Plot snakes
-    my_cell.plot_snake_overlay(save_path="src/figures/snake_overlay.png")
+    my_cell.plot_snake_overlay(background='processed', save_path="src/figures/snake_overlay.png")
 
     # Print final info
     my_cell.print_info()
