@@ -4,15 +4,11 @@ import os
 from skimage.filters import threshold_multiotsu
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
-import pandas as pd
-from skimage import measure
-from skimage.morphology import skeletonize
-from skimage.segmentation import active_contour
-from scipy.spatial.distance import euclidean
 from skimage.morphology import binary_opening, disk
 from skimage.measure import marching_cubes
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from skimage.morphology import remove_small_objects
+from matplotlib import animation
 
 
 class SegmentedCell:
@@ -342,16 +338,15 @@ class SegmentedCell:
                            "Post-Thresholding Mask",
                            save_path=save_path)
     
-    def plot_3d_surface(self, save_path=None):
+    def _setup_3d_plot(self):
         """
-        Visualizes the generated 3D mesh using Matplotlib
+        Private helper that sets up the figure, mesh, and isotropic scaling.
+        Returns (fig, ax) so other methods can use them.
         """
         if self.mesh_verts is None:
-            print("Error: No mesh found. Run .generate_3d_surface() first.")
+            print("No mesh found. Run .generate_3d_surface() first.")
             return
         
-        print("Plotting 3D surface...")
-
         fig = plt.figure(figsize=(10, 10))
         ax = fig.add_subplot(111, projection='3d')
 
@@ -389,14 +384,86 @@ class SegmentedCell:
         ax.set_ylabel("Y (microns)")
         ax.set_zlabel("Z (microns)")
 
-        title = f"3D Reconstruction (t={self.processed_time_index})\n(File: {self.filename})"
-        plt.title(title)
+        return fig, ax
+    
+    def plot_3d_surface(self, save_path=None):
+        """
+        Visualizes the generated 3D mesh using Matplotlib
+        """
+        try:
+            fig, ax = self._setup_3d_plot()
+            plt.title(f"Interactive 3D View (t={self.processed_time_index})")
+            plt.show()
+        except ValueError as e:
+            print(f"ValueError occurred: {e}")
+    
+    def save_snapshot(self, filename, elev=30, azim=45):
+        """
+        Saves a static PNG of the 3D mesh from a specific angle.
 
-        if save_path:
-            plt.savefig(save_path)
-            print(f"Saved 3D plot to {save_path}")
+        Args:
+            filename (str): Path to save (e.g. "figures/view_1.png").
+            elev (float): Elevation angle (up/down).
+            azim (float): Azimuth angle (rotation around z)
+        """
+        print(f"Saving snapshot to {filename} (elev={elev}, azim={azim}.)")
+
+        try:
+            fig, ax = self._setup_3d_plot()
+
+            # Set up camera angle
+            ax.view_init(elev=elev, azim=azim)
+            plt.title(f"Snapshot (t={self.processed_time_index})")
+
+            # Save and close
+            plt.savefig(filename, dpi=150)
+            plt.close(fig)
+            print('Snapshot saved.')
         
-        plt.show()
+        except ValueError as e:
+            print(f"A ValueError has occurred: {e}")
+    
+    def save_rotating_gif(self, filename, fps=15, duration_sec=4):
+        """
+        Generates a smooth rotating GIF of the 3D mesh.
+
+        Args:
+            filename (str): Path to save (e.g. "figures/rotation.gif").
+            fps (int): Frames per second.
+            duration_sec (int): How long the full rotation takes.
+        """
+        print(f"Generating rotating GIF: {filename}...")
+
+        try:
+            fig, ax = self._setup_3d_plot()
+            plt.title(f"3D Rotation (t={self.processed_time_index})")
+
+            # Calculate frames
+            total_frames = fps * duration_sec
+
+            # Define the update function for the animation
+            def update(frame):
+                # Rotate the azimuth from 0 to 360 degrees
+                angle = (frame / total_frames * 360)
+                ax.view_init(elev=30, azim=angle)
+                return fig,
+
+            # Create animation
+            anim = animation.FuncAnimation(
+                fig,
+                update,
+                frames=total_frames,
+                interval=1000/fps,
+                blit=False
+            )
+
+            # Save
+            anim.save(filename, writer='pillow', fps=fps, dpi=100)
+            plt.close(fig)
+            print("GIF saved successfully.")
+        
+        except ValueError as e:
+            print(f"ValueError has occurred: {e}")
 
 
 if __name__ == "__main__":
@@ -415,7 +482,7 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 10
+    time = 20
     my_cell.run_thresholding(time_index=time)
 
     # Clean mask
@@ -425,6 +492,12 @@ if __name__ == "__main__":
     my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
     my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
 
-    # Build 3D model and plot
+    # Build 3D model
     my_cell.generate_3d_surface()
-    my_cell.plot_3d_surface(save_path="src/figures/3dplot")
+    
+    # Save a specific view
+    my_cell.save_snapshot("src/figures/top_down_view.png", elev=90, azim=0)
+    my_cell.save_snapshot("src/figures/side_view.png", elev=0, azim=45)
+
+    # Save GIF 
+    my_cell.save_rotating_gif("src/figures/nucleus_spin.gif", fps=20, duration_sec=5)
