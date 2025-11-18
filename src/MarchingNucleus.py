@@ -54,7 +54,7 @@ class SegmentedCell:
         self.mesh_faces = None
 
         print(f"SegmentedCell object created for {self.filename}")
-    
+
     def load_mat_data(self):
         """
         Loads and parses the data from the .mat file.
@@ -189,26 +189,30 @@ class SegmentedCell:
             print("Error: Missing thresholded data.",
                   "Run .run_thresholding() first.")
             return
-        
+
         print("\nGenerating 3D surface mesh (Marching Cubes)...")
 
         # Get the spacing from the metadata (if available)
         if self.voxel_size is not None:
             v_size = np.array(self.voxel_size).flatten()
-            spacing = (v_size[1], v_size[0], v_size[2])  # FIXME: remove magic nums
+            spacing = (v_size[1],
+                       v_size[0],
+                       v_size[2])  # FIXME: remove magic nums
         else:
             spacing = (1.0, 1.0, 1.0)
-            print("Warning: No voxel size found. Assuming isotropic (1.0, 1.0, 1.0)")
-        
+            print("Warning: No voxel size found.",
+                  "Assuming isotropic (1.0, 1.0, 1.0)")
+
         # Smooth the binary mask before we mesh it
         # Note that this is a 3D-smoothing. It accounts for the z-slice data
         # above and below each region.
         if mesh_smooth_sigma > 0:
             mask_float = self.post_threshold_data_t.astype(float)
-            volume_to_mesh = gaussian_filter(mask_float, sigma=mesh_smooth_sigma)
+            volume_to_mesh = gaussian_filter(mask_float,
+                                             sigma=mesh_smooth_sigma)
         else:
             volume_to_mesh = self.post_threshold_data_t
-        
+
         try:
             # Run marching cubes
             verts, faces, normals, values = marching_cubes(
@@ -218,29 +222,32 @@ class SegmentedCell:
                 step_size=step_size,
                 allow_degenerate=False
             )
-            
+
             self.mesh_verts = verts
             self.mesh_faces = faces
-            print(f"3D Surface generated: {len(verts)} vertices, {len(faces)} faces.")
-        
+            print(f"3D Surface generated: {len(verts)} vertices,",
+                  f"{len(faces)} faces.")
+
         except RuntimeError:
             print("Error: Could not generate surface. Mask might be empty.")
 
         except Exception as e:
             print(f"An error has occurred during Marching Cubes: {e}")
-    
+
     def clean_mask(self, min_size=50):
         """
-        Sweeps through the binary mask to remove small, disconnected floating blobs.
+        Sweeps through the binary mask to remove small, disconnected floating
+        blobs.
 
         Args:
             min_size (int): The smallest allowable object size (in voxels).
                 Any blob smaller than this is deleted.
         """
         if self.post_threshold_data_t is None:
-            print("Error: Missing thresholded data. Run .run_thresholding() first.")
+            print("Error: Missing thresholded data.",
+                  "Run .run_thresholding() first.")
             return
-        
+
         print(f"Cleaning mask (removing blobs < {min_size} voxels)...")
 
         # Convert to a boolean array
@@ -253,7 +260,7 @@ class SegmentedCell:
 
         self.post_threshold_data_t = cleaned_mask
         print("Mask cleaned.")
-    
+
     def _plot_slices(self, data_3d, title_prefix, save_path=False):
         """
         Private helper method to plot the first 6 Z-slices of 3D data
@@ -325,8 +332,8 @@ class SegmentedCell:
         """
         print("Plotting raw data (see figure)")
         self._plot_slices(self.raw_data_t,
-                           "Raw Data (Pre-Thresholding)",
-                           save_path=save_path)
+                          "Raw Data (Pre-Thresholding)",
+                          save_path=save_path)
 
     def plot_thresholded_data(self, save_path=False):
         """
@@ -335,9 +342,9 @@ class SegmentedCell:
         """
         print("Plotting thresholded data (see figure)")
         self._plot_slices(self.post_threshold_data_t,
-                           "Post-Thresholding Mask",
-                           save_path=save_path)
-    
+                          "Post-Thresholding Mask",
+                          save_path=save_path)
+
     def _setup_3d_plot(self):
         """
         Private helper that sets up the figure, mesh, and isotropic scaling.
@@ -346,7 +353,7 @@ class SegmentedCell:
         if self.mesh_verts is None:
             print("No mesh found. Run .generate_3d_surface() first.")
             return
-        
+
         fig = plt.figure(figsize=(10, 10))
         ax = fig.add_subplot(111, projection='3d')
 
@@ -385,7 +392,7 @@ class SegmentedCell:
         ax.set_zlabel("Z (microns)")
 
         return fig, ax
-    
+
     def plot_3d_surface(self, save_path=None):
         """
         Visualizes the generated 3D mesh using Matplotlib
@@ -396,7 +403,7 @@ class SegmentedCell:
             plt.show()
         except ValueError as e:
             print(f"ValueError occurred: {e}")
-    
+
     def save_snapshot(self, filename, elev=30, azim=45):
         """
         Saves a static PNG of the 3D mesh from a specific angle.
@@ -419,10 +426,10 @@ class SegmentedCell:
             plt.savefig(filename, dpi=150)
             plt.close(fig)
             print('Snapshot saved.')
-        
+
         except ValueError as e:
             print(f"A ValueError has occurred: {e}")
-    
+
     def save_rotating_gif(self, filename, fps=15, duration_sec=8):
         """
         Generates a smooth rotating GIF of the 3D mesh.
@@ -461,7 +468,7 @@ class SegmentedCell:
             anim.save(filename, writer='pillow', fps=fps, dpi=100)
             plt.close(fig)
             print("GIF saved successfully.")
-        
+
         except ValueError as e:
             print(f"ValueError has occurred: {e}")
 
@@ -482,7 +489,7 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 20
+    time = 10
     my_cell.run_thresholding(time_index=time)
 
     # Clean mask
@@ -494,10 +501,12 @@ if __name__ == "__main__":
 
     # Build 3D model
     my_cell.generate_3d_surface()
-    
+
     # Save a specific view
     my_cell.save_snapshot("src/figures/top_down_view.png", elev=90, azim=0)
     my_cell.save_snapshot("src/figures/side_view.png", elev=0, azim=45)
 
-    # Save GIF 
-    my_cell.save_rotating_gif("src/figures/nucleus_spin.gif", fps=20, duration_sec=8)
+    # Save GIF
+    my_cell.save_rotating_gif("src/figures/nucleus_spin.gif",
+                              fps=20,
+                              duration_sec=8)

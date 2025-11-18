@@ -502,8 +502,8 @@ class SegmentedCell:
             # Blur the raw image to create a smooth "force field"
             if snake_blur_sigma > 0:
                 image_slice_blurred = gaussian_filter(image_slice_raw,
-                                                          sigma=snake_blur_sigma,
-                                                          mode="reflect")
+                                                      sigma=snake_blur_sigma,
+                                                      mode="reflect")
             else:
                 image_slice_blurred = image_slice_raw
 
@@ -511,13 +511,15 @@ class SegmentedCell:
             img_min = image_slice_blurred.min()
             img_max = image_slice_blurred.max()
             if img_max > img_min:
-                image_slice_norm = (image_slice_blurred - img_min) / (img_max - img_min)
+                numer = image_slice_blurred - img_min
+                denom = img_max - img_min
+                image_slice_norm = numer / denom
             else:
                 image_slice_norm = image_slice_blurred  # Handle blank images
-            
+
             # Add this normalized slice to the processed list
             all_processed_slices.append(image_slice_norm)
-            
+
             # Get all skeletons for this slice
             slice_skeletons = skeletons[skeletons["Z"] == z_slice]
 
@@ -574,7 +576,10 @@ class SegmentedCell:
         print("Active contour fitting complete.\n")
         print(f"No snakes were harmed in the fitting of these data.")
 
-    def plot_snake_overlay(self, background='raw', legend=False, save_path=None):
+    def plot_snake_overlay(self,
+                           background='raw',
+                           legend=False,
+                           save_path=None):
         """
         Plotting function that overlays the fitted snakes onto the raw data.
         Saving is optional.
@@ -582,7 +587,7 @@ class SegmentedCell:
         Args:
             background (str): 'raw' (default) or 'processed'.
                 Determines the background image.
-            legend (bool): Add legend to the plots or not. 
+            legend (bool): Add legend to the plots or not.
             save_path (str): A provided path will save the image at the
                 specified path. Leaving this blank will not save the image.
         """
@@ -601,13 +606,15 @@ class SegmentedCell:
             bg_cmap = 'gray'
             title_bg = "Processed (Blurred/Normalized) Data"
         else:
-            print(f"Error: background must be 'raw' or 'processed', not {background}.")
+            print("Error: background must be 'raw' or 'processed',",
+                  f"not {background}.")
             return
-        
+
         if bg_data is None:
-            print(f"Error: Background data for '{background}' is not available.")
+            print(f"Error: Background data for '{background}'",
+                  "is not available.")
             return
-        
+
         print("Plotting snake overlays (see figure).")
 
         # Initialize sub-plots
@@ -641,7 +648,11 @@ class SegmentedCell:
                 color_index = (region_id - 1) % num_colors
 
                 # Plot snakes
-                ax.scatter(snake_coords[:, 0], snake_coords[:, 1], color=color_list[color_index], s=1.0, label=f"Region {region_id}")
+                ax.scatter(snake_coords[:, 0],
+                           snake_coords[:, 1],
+                           color=color_list[color_index],
+                           s=1.0,
+                           label=f"Region {region_id}")
 
             ax.set_title(f"Z-slice {z}")
             ax.invert_yaxis()
@@ -708,7 +719,8 @@ if __name__ == "__main__":
     )
 
     # Plot snakes
-    my_cell.plot_snake_overlay(background='processed', save_path="src/figures/snake_overlay.png")
+    my_cell.plot_snake_overlay(background='processed',
+                               save_path="src/figures/snake_overlay.png")
 
     # Print final info
     my_cell.print_info()
