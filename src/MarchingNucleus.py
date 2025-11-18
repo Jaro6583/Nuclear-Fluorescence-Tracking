@@ -423,7 +423,7 @@ class SegmentedCell:
         except ValueError as e:
             print(f"A ValueError has occurred: {e}")
     
-    def save_rotating_gif(self, filename, fps=15, duration_sec=4):
+    def save_rotating_gif(self, filename, fps=15, duration_sec=8):
         """
         Generates a smooth rotating GIF of the 3D mesh.
 
@@ -500,4 +500,4 @@ if __name__ == "__main__":
     my_cell.save_snapshot("src/figures/side_view.png", elev=0, azim=45)
 
     # Save GIF 
-    my_cell.save_rotating_gif("src/figures/nucleus_spin.gif", fps=20, duration_sec=5)
+    my_cell.save_rotating_gif("src/figures/nucleus_spin.gif", fps=20, duration_sec=8)

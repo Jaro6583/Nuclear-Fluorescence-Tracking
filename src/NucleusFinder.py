@@ -93,7 +93,7 @@ class SegmentedCell:
             print(f"An error occurred while loading {self.filename}: {e}")
 
     def run_thresholding(self, time_index=25, channel_index=1,
-                         smooth_sigma=1.0, binary_smoth_size=2):
+                         smooth_sigma=1.0, binary_smooth_size=1):
         """
         Takes the loaded 5D data, processes a single time point using
         multi-Otsu thresholding (3 classes) on each individual z-slice,
@@ -151,8 +151,8 @@ class SegmentedCell:
                 slice_mask = slice_smoothed > nucleus_threshold
 
                 # Smooth the mask
-                if binary_smoth_size > 0:
-                    footprint = disk(binary_smoth_size)
+                if binary_smooth_size > 0:
+                    footprint = disk(binary_smooth_size)
                     slice_mask = binary_opening(slice_mask, footprint)
 
                 all_slice_masks.append(slice_mask)
@@ -684,11 +684,11 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 10
+    time = 50
     my_cell.run_thresholding(time_index=time)
 
     # Plot raw and thresholded data (save)
-    #my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
+    my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
     my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
 
     # Find skeletons from the threshold mask
@@ -704,7 +704,7 @@ if __name__ == "__main__":
         w_line=100.0,
         w_edge=-1.0,
         snake_blur_sigma=2.0,
-        max_num_iter=5
+        max_num_iter=50
     )
 
     # Plot snakes
