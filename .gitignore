@@ -1,0 +1,9 @@
+# --- Python stuff ---
+__pycache__/
+
+# --- Figures ---
+src/figures/
+
+# --- Data ---
+src/data/Annotated Cells/
+src/data/MB1411/

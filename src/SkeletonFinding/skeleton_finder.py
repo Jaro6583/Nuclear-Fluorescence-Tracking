@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 from skimage import measure
 from skimage.morphology import skeletonize
 import pandas as pd
-import sys
 
 
 def plot_skeleton_overlay(skeletons, save=False, legend=False):
