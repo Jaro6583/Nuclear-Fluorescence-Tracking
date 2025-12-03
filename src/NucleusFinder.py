@@ -110,7 +110,7 @@ class SegmentedCell:
         """
         if len(coords) < min_index_dist * 2:
             return coords
-        
+
         # Calculate distance matrix
         dists = cdist(coords, coords)
 
@@ -135,7 +135,7 @@ class SegmentedCell:
                 index_mask[i, -(min_index_dist - i):] = False
             if i > n - min_index_dist:
                 index_mask[i, :min_index_dist - (n - i)] = False
-        
+
         # Apply mask (set neighbords to infinity so they aren't the minimum)
         dists[~index_mask] = np.inf
 
@@ -146,7 +146,7 @@ class SegmentedCell:
         # crescent
         if min_dist > gap_threshold:
             return coords
-        
+
         # If we've made it here, then there is a gap to close.
         idx1, idx2 = np.unravel_index(np.argmin(dists), dists.shape)
 
@@ -154,7 +154,7 @@ class SegmentedCell:
         start_idx, end_idx = sorted((idx1, idx2))
 
         # Split into two paths
-        path_a = coords[start_idx : end_idx + 1]
+        path_a = coords[start_idx:(end_idx + 1)]
 
         # path_b is what wraps around the end
         path_b = np.vstack([coords[end_idx:], coords[:start_idx + 1]])
@@ -225,7 +225,8 @@ class SegmentedCell:
 
             # Calculate the best threshold using Otsu's multi method
             try:
-                thresholds = threshold_multiotsu(slice_smoothed, classes=4)  # FIXME: set back to 3 classes
+                # FIXME: set back to 3 classes
+                thresholds = threshold_multiotsu(slice_smoothed, classes=4)
                 nucleus_threshold = thresholds[-1]
 
                 # Apply the upper threshold
@@ -235,14 +236,14 @@ class SegmentedCell:
                 if binary_smooth_size > 0:
                     footprint = disk(binary_smooth_size)
                     slice_mask = binary_opening(slice_mask, footprint)
-                
+
                 # Remove small regions
                 if min_size > 0:
                     slice_mask = remove_small_objects(slice_mask,
                                                       min_size=min_size)
-                
-                # Remove large regions
-                # This is mostly just to catch if the entire window passed the threshold
+
+                # Remove large regions. This is mostly just to catch if the
+                # entire window passed the threshold.
                 if max_size is not None:
                     # Label connected regions
                     labeled_slice = measure.label(slice_mask)
@@ -344,7 +345,7 @@ class SegmentedCell:
             print("Error: No thresholded data found.")
             print("Please run .run_thresholding() first.")
             return
-        
+
         print("\nFinding boundaries (contours) in thresholded data...")
         data = self.post_threshold_data_t
         self.skeletons = {}
@@ -382,7 +383,7 @@ class SegmentedCell:
 
                     # Add z coordinate column
                     z_coords = np.full((coords.shape[0], 1), z)
-                    full_coords = np.hstack((coords, z_coords)) # Now (X,Y,Z)
+                    full_coords = np.hstack((coords, z_coords))  # Now (X,Y,Z)
 
                     # Store in dict
                     self.skeletons[(z, region_label_ID)] = full_coords
@@ -394,7 +395,7 @@ class SegmentedCell:
                     data_list.append(temp_df)
                 else:
                     self.skeletons[(z, region_label_ID)] = np.array([])
-        
+
         # Create the final dataframe
         if data_list:
             self.skeletons_df = pd.concat(data_list, ignore_index=True)
@@ -402,8 +403,9 @@ class SegmentedCell:
             self.skeletons_df = pd.DataFrame(
                 columns=["X", "Y", "Z", "Region_id"]
             )
-        
-        print(f"Boundary finding complete. Found {len(self.skeletons)} regions.\n")
+
+        print(f"Boundary finding complete. Found {len(self.skeletons)}",
+              "regions.\n")
 
     def print_info(self):
         """
@@ -702,7 +704,7 @@ class SegmentedCell:
 
                 # Fix row/col issue
                 snake_input_rc = region_coords[:, [1, 0]]
-                
+
                 if np.allclose(snake_input_rc[0], snake_input_rc[-1]):
                     initial_snake = snake_input_rc[:-1]
                 else:
@@ -869,7 +871,7 @@ if __name__ == "__main__":
     my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
 
     # Find skeletons from the threshold mask
-    #my_cell.find_skeletons()
+    # my_cell.find_skeletons()
     my_cell.find_boundaries()
 
     # Plot skeleton overlays
