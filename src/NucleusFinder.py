@@ -10,6 +10,7 @@ from skimage.morphology import skeletonize
 from skimage.segmentation import active_contour
 from scipy.spatial.distance import euclidean
 from skimage.morphology import binary_opening, disk
+from skimage.measure import find_contours
 
 
 class SegmentedCell:
@@ -239,42 +240,108 @@ class SegmentedCell:
         print(f"Skeleton finding complete.",
               f"Found {len(self.skeletons)} regions.\n")
 
+    def find_boundaries(self):
+        """
+        Finds the outer perimeter (contours) of the thresholded mask.
+        """
+        if self.post_threshold_data_t is None:
+            print("Error: No thresholded data found.")
+            print("Please run .run_thresholding() first.")
+            return
+        
+        print("\nFinding boundaries (contours) in thresholded data...")
+        data = self.post_threshold_data_t
+        self.skeletons = {}
+
+        data_list = []
+
+        # Loop through each z-slice
+        num_z_slices = data.shape[2]
+
+        for i in range(num_z_slices):
+            z = i + 1
+            image_slice = data[:, :, i]
+
+            # Label the data to separate distinct nuclei
+            labeled_slice = measure.label(image_slice, connectivity=2)
+            num_objects = labeled_slice.max()
+
+            for region_label_ID in range(1, num_objects + 1):
+                # Isolate the specific object mask
+                region_mask = (labeled_slice == region_label_ID)
+                # Find contours. level=0.5 finds the boundary between 0 and 1.
+                contours = find_contours(region_mask, level=0.5)
+
+                if contours:
+                    # If multiple contours found (e.g. holes), take the
+                    # longest one.
+                    longest_contour = max(contours, key=len)
+
+                    # find_contours returns (row, col) -> (Y, X).
+                    # We need to swap these to match convention.
+                    coords = longest_contour[:, [1, 0]]
+
+                    # Add z coordinate column
+                    z_coords = np.full((coords.shape[0], 1), z)
+                    full_coords = np.hstack((coords, z_coords)) # Now (X,Y,Z)
+
+                    # Store in dict
+                    self.skeletons[(z, region_label_ID)] = full_coords
+
+                    # Store in DataFrame list
+                    temp_df = pd.DataFrame(coords, columns=["X", "Y"])
+                    temp_df["Z"] = z
+                    temp_df['Region_id'] = region_label_ID
+                    data_list.append(temp_df)
+                else:
+                    self.skeletons[(z, region_label_ID)] = np.array([])
+        
+        # Create the final dataframe
+        if data_list:
+            self.skeletons_df = pd.concat(data_list, ignore_index=True)
+        else:
+            self.skeletons_df = pd.DataFrame(
+                columns=["X", "Y", "Z", "Region_id"]
+            )
+        
+        print(f"Boundary finding complete. Found {len(self.skeletons)} regions.\n")
+
     def print_info(self):
         """
         A helper function to print the status of the loaded data.
         FIXME: Decide what the useful things to print are.
         """
 
-        print(f"\n--- Info for {self.filename} ---")
+        print(f"\n|--- Info for {self.filename} ---")
 
         if self.movie_ch2 is not None:
-            print(f"4D data shape ('cell3D'): {self.movie_ch2.shape}")
+            print(f"|4D data shape ('cell3D'): {self.movie_ch2.shape}")
         else:
-            print("4D Data: Not loaded. Call .load_mat_data() first.")
+            print("|4D Data: Not loaded. Call .load_mat_data() first.")
 
         if self.raw_data_t is not None:
-            print(f"3D Raw Slice Shape: {self.raw_data_t.shape}")
+            print(f"|3D Raw Slice Shape: {self.raw_data_t.shape}")
         else:
-            print(f"3D Raw Slice: Not processed.")
+            print(f"|3D Raw Slice: Not processed.")
 
         if self.post_threshold_data_t is not None:
-            print(f"3D Thresholding Slice Shape:",
+            print(f"|3D Thresholding Slice Shape:",
                   f"{self.post_threshold_data_t.shape}")
         else:
-            print(f"3D Thresholding Slice: Not processed.")
+            print(f"|3D Thresholding Slice: Not processed.")
 
         if self.skeletons:
-            print(f"Skeletons found for {len(self.skeletons)} regions.")
+            print(f"|Skeletons found for {len(self.skeletons)} regions.")
         else:
-            print(f"Skeletons: Not processed.")
+            print(f"|Skeletons: Not processed.")
 
         if self.snakes_df is not None:
-            print(f"Active Contours fit for",
+            print(f"|Active Contours fit for",
                   f"{len(self.snakes_df["Region_id"].unique())} regions.")
         else:
-            print(f'Active Contours: Not processed.')
+            print(f'|Active Contours: Not processed.')
 
-        print("----------------------------------------------------\n")
+        print("|----------------------------------------------------\n")
 
     def _plot_3d_data(self, data_3d, title_prefix, save_path=False):
         """
@@ -534,16 +601,19 @@ class SegmentedCell:
                 if region_coords.shape[0] < 3:
                     continue  # Not enough points to fit
 
+                # Fix row/col issue
+                snake_input_rc = region_coords[:, [1, 0]]
+                
                 # Check if this region is circular or not
                 circular = self._is_closed_loop(region_coords,
                                                 closed_loop_threshold)
 
                 if circular:
                     # Close the loop by adding the first point to the end
-                    start_point = region_coords[0, :].reshape(1, -1)
-                    initial_snake = np.vstack([region_coords, start_point])
+                    start_point = snake_input_rc[0, :].reshape(1, -1)
+                    initial_snake = np.vstack([snake_input_rc, start_point])
                 else:
-                    initial_snake = region_coords
+                    initial_snake = snake_input_rc
 
                 # Perform the fit
                 improved_fit = active_contour(
@@ -557,6 +627,9 @@ class SegmentedCell:
                     boundary_condition="periodic",
                     max_num_iter=max_num_iter
                 )
+
+                # Swap back
+                improved_fit = improved_fit[:, [1, 0]]
 
                 # Make a temporary DataFrame and add it to our list
                 temp_df = pd.DataFrame(improved_fit, columns=["X", "Y"])
@@ -695,31 +768,32 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 50
+    time = 10
     my_cell.run_thresholding(time_index=time)
 
     # Plot raw and thresholded data (save)
-    my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
-    my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
+    #my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
+    #my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
 
     # Find skeletons from the threshold mask
-    my_cell.find_skeletons()
+    #my_cell.find_skeletons()
+    my_cell.find_boundaries()
 
     # Plot skeleton overlays
     my_cell.plot_skeleton_overlay(save_path="src/figures/skeleton_overlay.png")
 
     # Fit active contours (Snakes)
     my_cell.fit_active_contours(
-        alpha=0.0001,
-        beta=1000.0,
-        w_line=100.0,
-        w_edge=-1.0,
-        snake_blur_sigma=2.0,
-        max_num_iter=50
+        alpha=0.5,
+        beta=10.0,
+        w_line=10.0,
+        w_edge=-0.1,
+        snake_blur_sigma=1.0,
+        max_num_iter=150
     )
 
     # Plot snakes
-    my_cell.plot_snake_overlay(background='processed',
+    my_cell.plot_snake_overlay(background='raw',
                                save_path="src/figures/snake_overlay.png")
 
     # Print final info
