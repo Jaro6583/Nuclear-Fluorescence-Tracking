@@ -9,7 +9,7 @@ from skimage import measure
 from skimage.morphology import skeletonize
 from skimage.segmentation import active_contour
 from scipy.spatial.distance import euclidean
-from skimage.morphology import binary_opening, disk
+from skimage.morphology import binary_opening, disk, remove_small_objects
 from skimage.measure import find_contours
 
 
@@ -93,8 +93,13 @@ class SegmentedCell:
         except Exception as e:
             print(f"An error occurred while loading {self.filename}: {e}")
 
-    def run_thresholding(self, time_index=25, channel_index=1,
-                         smooth_sigma=1.0, binary_smooth_size=1):
+    def run_thresholding(self,
+                         time_index=25,
+                         channel_index=1,
+                         smooth_sigma=1.0,
+                         binary_smooth_size=1,
+                         min_size=15,
+                         max_size=800):
         """
         Takes the loaded 5D data, processes a single time point using
         multi-Otsu thresholding (3 classes) on each individual z-slice,
@@ -108,6 +113,9 @@ class SegmentedCell:
                 before thresholding.
             binary_smooth_size (int): Radius of the disk used for binary
                 opening. Higher values smooth the edge more.
+            min_size (int): The smallest allowable object size (in pixels) for
+                a single z-slice. Regions smaller than this are removed.
+            max_size (int): Largest allowable object. Set to 'None' to disable
         """
         if self.movie_ch2 is None:
             print("\nError: No data loaded. Call .load_mat_data() first.")
@@ -155,6 +163,22 @@ class SegmentedCell:
                 if binary_smooth_size > 0:
                     footprint = disk(binary_smooth_size)
                     slice_mask = binary_opening(slice_mask, footprint)
+                
+                # Remove small regions
+                if min_size > 0:
+                    slice_mask = remove_small_objects(slice_mask,
+                                                      min_size=min_size)
+                
+                # Remove large regions
+                # This is mostly just to catch if the entire window passed the threshold
+                if max_size is not None:
+                    # Label connected regions
+                    labeled_slice = measure.label(slice_mask)
+
+                    # Iterate through each region
+                    for region in measure.regionprops(labeled_slice):
+                        if region.area > max_size:
+                            slice_mask[labeled_slice == region.label] = False
 
                 all_slice_masks.append(slice_mask)
 
@@ -604,14 +628,8 @@ class SegmentedCell:
                 # Fix row/col issue
                 snake_input_rc = region_coords[:, [1, 0]]
                 
-                # Check if this region is circular or not
-                circular = self._is_closed_loop(region_coords,
-                                                closed_loop_threshold)
-
-                if circular:
-                    # Close the loop by adding the first point to the end
-                    start_point = snake_input_rc[0, :].reshape(1, -1)
-                    initial_snake = np.vstack([snake_input_rc, start_point])
+                if np.allclose(snake_input_rc[0], snake_input_rc[-1]):
+                    initial_snake = snake_input_rc[:-1]
                 else:
                     initial_snake = snake_input_rc
 
@@ -768,12 +786,12 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 10
-    my_cell.run_thresholding(time_index=time)
+    time = 30
+    my_cell.run_thresholding(time_index=time, min_size=60)
 
     # Plot raw and thresholded data (save)
-    #my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
-    #my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
+    my_cell.plot_raw_data(save_path="src/figures/raw_data.png")
+    my_cell.plot_thresholded_data(save_path="src/figures/thresholded_data.png")
 
     # Find skeletons from the threshold mask
     #my_cell.find_skeletons()
@@ -784,16 +802,16 @@ if __name__ == "__main__":
 
     # Fit active contours (Snakes)
     my_cell.fit_active_contours(
-        alpha=0.5,
-        beta=10.0,
+        alpha=0.01,
+        beta=40.0,
         w_line=10.0,
-        w_edge=-0.1,
-        snake_blur_sigma=1.0,
-        max_num_iter=150
+        w_edge=0.0,
+        snake_blur_sigma=1.5,
+        max_num_iter=5
     )
 
     # Plot snakes
-    my_cell.plot_snake_overlay(background='raw',
+    my_cell.plot_snake_overlay(background='processed',
                                save_path="src/figures/snake_overlay.png")
 
     # Print final info
