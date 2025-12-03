@@ -11,6 +11,7 @@ from skimage.segmentation import active_contour
 from scipy.spatial.distance import euclidean
 from skimage.morphology import binary_opening, disk, remove_small_objects
 from skimage.measure import find_contours
+from scipy.spatial.distance import cdist
 
 
 class SegmentedCell:
@@ -93,6 +94,77 @@ class SegmentedCell:
         except Exception as e:
             print(f"An error occurred while loading {self.filename}: {e}")
 
+    def _bridge_crescent_gap(self, coords,
+                             gap_threshold=2.0,
+                             min_index_dist=15):
+        """
+        Detects if a contour is a 'C-shape' (crescent) and bridges the gap
+        to make it an 'O-shape'.
+
+        Args:
+            coords: (N, 2) array of (X, Y) coordinates.
+            gap_threshold: Max distance (pixels) between two non-adjacent
+                points to consider them a 'gap' to be closed.
+            min_index_dist: Minimum number of indices apart two points must
+                be to consider bridging. Prevents bridging neighbors.
+        """
+        if len(coords) < min_index_dist * 2:
+            return coords
+        
+        # Calculate distance matrix
+        dists = cdist(coords, coords)
+
+        # Create a mask to ignore points that are naturally close
+        n = len(coords)
+        index_mask = np.ones((n, n), dtype=bool)
+
+        # Mask out the diagonal band (neighbors)
+        for i in range(n):
+            # Forward neighbords
+            start_f = i
+            end_f = min(n, i + min_index_dist)
+            index_mask[i, start_f:end_f] = False
+
+            # Backward neighbords
+            start_b = max(0, i - min_index_dist)
+            end_b = i
+            index_mask[i, start_b:end_b] = False
+
+            # Wrap-around neighbords
+            if i < min_index_dist:
+                index_mask[i, -(min_index_dist - i):] = False
+            if i > n - min_index_dist:
+                index_mask[i, :min_index_dist - (n - i)] = False
+        
+        # Apply mask (set neighbords to infinity so they aren't the minimum)
+        dists[~index_mask] = np.inf
+
+        # Find the closest pair of non-neighbor points
+        min_dist = np.min(dists)
+
+        # If the closest 'shortcut' is larger than our threshold, it's not a
+        # crescent
+        if min_dist > gap_threshold:
+            return coords
+        
+        # If we've made it here, then there is a gap to close.
+        idx1, idx2 = np.unravel_index(np.argmin(dists), dists.shape)
+
+        # Ensure idx1 is the earlier index
+        start_idx, end_idx = sorted((idx1, idx2))
+
+        # Split into two paths
+        path_a = coords[start_idx : end_idx + 1]
+
+        # path_b is what wraps around the end
+        path_b = np.vstack([coords[end_idx:], coords[:start_idx + 1]])
+
+        # Return the longer path
+        if len(path_a) > len(path_b):
+            return path_a
+        else:
+            return path_b
+
     def run_thresholding(self,
                          time_index=25,
                          channel_index=1,
@@ -153,8 +225,8 @@ class SegmentedCell:
 
             # Calculate the best threshold using Otsu's multi method
             try:
-                thresholds = threshold_multiotsu(slice_smoothed, classes=3)
-                nucleus_threshold = thresholds[1]
+                thresholds = threshold_multiotsu(slice_smoothed, classes=4)  # FIXME: set back to 3 classes
+                nucleus_threshold = thresholds[-1]
 
                 # Apply the upper threshold
                 slice_mask = slice_smoothed > nucleus_threshold
@@ -304,6 +376,9 @@ class SegmentedCell:
                     # find_contours returns (row, col) -> (Y, X).
                     # We need to swap these to match convention.
                     coords = longest_contour[:, [1, 0]]
+
+                    # Check for a crescent shape and close it
+                    coords = self._bridge_crescent_gap(coords=coords)
 
                     # Add z coordinate column
                     z_coords = np.full((coords.shape[0], 1), z)
@@ -786,7 +861,7 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 30
+    time = 13
     my_cell.run_thresholding(time_index=time, min_size=60)
 
     # Plot raw and thresholded data (save)
