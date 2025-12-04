@@ -865,7 +865,7 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 10
+    time = 33
     my_cell.run_thresholding(time_index=time, min_size=60)
 
     # Plot raw and thresholded data (save)
