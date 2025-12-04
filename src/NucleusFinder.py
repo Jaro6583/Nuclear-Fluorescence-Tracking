@@ -171,7 +171,7 @@ class SegmentedCell:
                          smooth_sigma=1.0,
                          binary_smooth_size=1,
                          min_size=15,
-                         max_size=800):
+                         max_size=1200):
         """
         Takes the loaded 5D data, processes a single time point using
         multi-Otsu thresholding (3 classes) on each individual z-slice,
@@ -226,7 +226,7 @@ class SegmentedCell:
             # Calculate the best threshold using Otsu's multi method
             try:
                 # FIXME: set back to 3 classes
-                thresholds = threshold_multiotsu(slice_smoothed, classes=4)
+                thresholds = threshold_multiotsu(slice_smoothed, classes=3)
                 nucleus_threshold = thresholds[-1]
 
                 # Apply the upper threshold
@@ -252,6 +252,7 @@ class SegmentedCell:
                     for region in measure.regionprops(labeled_slice):
                         if region.area > max_size:
                             slice_mask[labeled_slice == region.label] = False
+                            print(f"Large region removed from Z-slice {i + 1}.")
 
                 all_slice_masks.append(slice_mask)
 
@@ -819,7 +820,7 @@ class SegmentedCell:
                 ax.scatter(snake_coords[:, 0],
                            snake_coords[:, 1],
                            color=color_list[color_index],
-                           s=1.0,
+                           s=5.1,  # FIXME: Set back to 1.0
                            label=f"Region {region_id}")
 
             ax.set_title(f"Z-slice {z}")
@@ -863,7 +864,7 @@ if __name__ == "__main__":
     my_cell.load_mat_data()
 
     # Run thresholding for a single time index
-    time = 13
+    time = 10
     my_cell.run_thresholding(time_index=time, min_size=60)
 
     # Plot raw and thresholded data (save)
@@ -888,7 +889,7 @@ if __name__ == "__main__":
     )
 
     # Plot snakes
-    my_cell.plot_snake_overlay(background='processed',
+    my_cell.plot_snake_overlay(background='raw',
                                save_path="src/figures/snake_overlay.png")
 
     # Print final info
