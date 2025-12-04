@@ -252,7 +252,8 @@ class SegmentedCell:
                     for region in measure.regionprops(labeled_slice):
                         if region.area > max_size:
                             slice_mask[labeled_slice == region.label] = False
-                            print(f"Large region removed from Z-slice {i + 1}.")
+                            print(f"Large region removed from",
+                                  f"Z-slice {i + 1}.")
 
                 all_slice_masks.append(slice_mask)
 
